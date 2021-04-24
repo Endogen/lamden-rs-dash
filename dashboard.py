@@ -173,6 +173,7 @@ class Rocketswap:
         self.last_update = None
         self.last_update_id = None
         self.selected_token = None
+        self.last_trade = "N/A"
 
     def update_trades(self):
         res = self.db.select_last_trade()
@@ -318,14 +319,16 @@ if __name__ == '__main__':
     app = dash.Dash(
         __name__,
         external_stylesheets=external_stylesheets,
-        meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"}])
+        meta_tags=[{
+            "name": "viewport",
+            "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"
+        }]
+    )
 
     app.layout = html.Div(children=[
         html.H1(children='Rocketswap Dashboard 🚀'),
 
-        html.Div(children='''
-            Choose Lamden Token
-        '''),
+        html.Div(children="Choose Lamden Token"),  # TODO: Passendes Input-Label verwenden?
 
         dcc.Dropdown(
             options=rs.get_token_symbols(),
@@ -342,15 +345,21 @@ if __name__ == '__main__':
             ),
 
             html.Div([
-                html.H5(children=f"{cf.default_token}-TAU 1 Day", id="price-title-1d", style={"text-align": "center"}),
+                html.H5(
+                    children=f"{cf.default_token}-TAU 1 Day",
+                    id="price-title-1d",
+                    style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-1d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, one_day)))  # TODO: Vereinfachen! Beide Objekte sind in 'rs'
+                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, one_day)))
             ], className="four columns"),
 
             html.Div([
-                html.H5(children=f"{cf.default_token}-TAU 5 Days", id="price-title-5d", style={"text-align": "center"}),
+                html.H5(
+                    children=f"{cf.default_token}-TAU 5 Days",
+                    id="price-title-5d",
+                    style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-5d',
@@ -358,7 +367,10 @@ if __name__ == '__main__':
             ], className="four columns"),
 
             html.Div([
-                html.H5(children=f"{cf.default_token}-TAU 30 Days", id="price-title-30d", style={"text-align": "center"}),
+                html.H5(
+                    children=f"{cf.default_token}-TAU 30 Days",
+                    id="price-title-30d",
+                    style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-30d',
@@ -367,7 +379,10 @@ if __name__ == '__main__':
         ], className="row"),
 
         html.Div([
-            html.H5(children=f"{cf.default_token}-TAU Overall", id="price-title-all", style={"text-align": "center"}),
+            html.H5(
+                children=f"{cf.default_token}-TAU Overall",
+                id="price-title-all",
+                style={"text-align": "center"}),
 
             dcc.Graph(
                 id='price-graph-all',
@@ -375,8 +390,8 @@ if __name__ == '__main__':
         ]),
 
         html.Div([
-            html.Label(children=f"Last Update: {str(datetime.now())}", id="last-update", style={"text-align": "center"}),
-            html.Label(children=f"{cf.default_token}-TAU Overall", id="label-test", style={"text-align": "center"})
+            html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"}),
+            #html.Label(children=f"{cf.default_token}-TAU Overall", id="label-test", style={"text-align": "center"})
         ]),
     ])
 
@@ -389,9 +404,10 @@ if __name__ == '__main__':
         Output('price-title-30d', 'children'),
         Output('price-graph-all', 'figure'),
         Output('price-title-all', 'children'),
+        Output('last-trade', 'children'),
         [Input('interval-component', 'n_intervals'),
          Input('token_symbol_input', 'value')])
-    def update_graph_on_trade(n, token_symbol):
+    def update_graph(n, token_symbol):
         caller_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
 
         if caller_id == "token_symbol_input" and token_symbol:
@@ -408,7 +424,8 @@ if __name__ == '__main__':
                 fig_1d, f"{token_symbol}-TAU 1 Day",
                 fig_5d, f"{token_symbol}-TAU 5 Days",
                 fig_30d, f"{token_symbol}-TAU 30 Days",
-                fig_all, f"{token_symbol}-TAU Overall"
+                fig_all, f"{token_symbol}-TAU Overall",
+                f"Last Trade: {rs.last_trade}"
             ]
 
         # TODO: Add update of token list if n_interval is 10, 20, 30, ...
@@ -437,11 +454,14 @@ if __name__ == '__main__':
                     fig_all = rs.get_graph(rs.get_token_trades(rs.selected_token))
                     fig_all.update_layout(transition_duration=500)
 
+                    rs.last_trade = str(datetime.now())
+
                     return [
                         fig_1d, f"{rs.selected_token}-TAU 1 Day",
                         fig_5d, f"{rs.selected_token}-TAU 5 Days",
                         fig_30d, f"{rs.selected_token}-TAU 30 Days",
-                        fig_all, f"{rs.selected_token}-TAU Overall"
+                        fig_all, f"{rs.selected_token}-TAU Overall",
+                        f"Last Trade: {rs.last_trade}"
                     ]
 
             print("Update aborted")
