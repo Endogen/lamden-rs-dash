@@ -303,8 +303,10 @@ class Rocketswap:
         return fig
 
 
-def to_unix_time(date_time):
-    return int((date_time - datetime(1970, 1, 1)).total_seconds())
+class Utils:
+    @staticmethod
+    def to_unix_time(date_time):
+        return int((date_time - datetime(1970, 1, 1)).total_seconds())
 
 
 if __name__ == '__main__':
@@ -320,9 +322,9 @@ if __name__ == '__main__':
 
     now = datetime.utcnow()
 
-    one_day = to_unix_time(now - timedelta(days=1))
-    five_days = to_unix_time(now - timedelta(days=5))
-    one_month = to_unix_time(now - timedelta(days=30))
+    one_day = Utils.to_unix_time(now - timedelta(days=1))
+    five_days = Utils.to_unix_time(now - timedelta(days=5))
+    one_month = Utils.to_unix_time(now - timedelta(days=30))
 
     external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
