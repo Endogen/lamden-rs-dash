@@ -35,9 +35,8 @@ class Config:
             return value
 
 
-# TODO: Rename to 'dashboard.db'
 class Database:
-    def __init__(self, db: str = "database.db"):
+    def __init__(self, db: str = "dashboard.db"):
         self.db = db
 
     def execute(self, sql_statement, *args):
