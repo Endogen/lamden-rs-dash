@@ -1,4 +1,3 @@
-import time
 import sqlite3
 import logging
 import requests
@@ -11,6 +10,7 @@ import plotly.graph_objs as go
 import pandas as pd
 
 from dash.dependencies import Output, Input
+from dash.exceptions import PreventUpdate
 from pandas import DataFrame
 from pathlib import Path
 
@@ -20,9 +20,9 @@ from datetime import datetime, timedelta
 # TODO: Add possibility to update DB periodically
 # TODO: Read config from file
 class Config:
-    url_call_wait = 1
     rs_url = "https://stats.rocketswap.exchange:2053/api/"
     default_token = "RSWP"
+    update_interval = 5000  # milliseconds
 
 
 # TODO: Rename to 'dashboard.db'
@@ -171,6 +171,10 @@ class Rocketswap:
         self.cfg = cfg
         self.db = db
 
+        self.last_update = None
+        self.last_update_id = None
+        self.selected_token = None
+
     def update_trades(self):
         res = self.db.select_last_trade()
 
@@ -193,22 +197,30 @@ class Rocketswap:
 
             skip += take
 
+            new_trades = tuple()
             for tx in res.json():
                 if tx["time"] > last_secs:
-                    self.db.insert_trade(
+                    trade = (
                         tx["contract_name"],
                         tx["token_symbol"],
                         tx["price"],
                         tx["time"],
-                        tx["type"])
+                        tx["type"]
+                    )
+
+                    new_trades += (trade,)
+                    self.db.insert_trade(*trade)  # TODO: Geht das?
                 else:
                     call = False
                     break
 
+            if new_trades:
+                self.last_update = new_trades
+
             if len(res.json()) != take:
                 call = False
 
-            time.sleep(self.cfg.url_call_wait)
+            print(self.last_update, "\n")  # TODO: TEMP
 
     def update_token_list(self):
         try:
@@ -229,11 +241,14 @@ class Rocketswap:
                 tk["token_name"],
                 tk["token_symbol"])
 
+    def get_last_update(self):
+        return self.last_update
+
     def get_token_trades(self, token_symbol, start_secs: int = 0):
-        res = self.db.select_token_trades(token_symbol, start_secs)
+        self.selected_token = token_symbol
 
         data = list()
-        for trade in res["data"]:
+        for trade in self.db.select_token_trades(token_symbol, start_secs)["data"]:
             data.append([trade[3], trade[2]])
 
         return data
@@ -246,11 +261,6 @@ class Rocketswap:
             data.append({"label": ts[0], "value": ts[0]})
 
         return data
-
-
-class Chart:
-    def __init__(self, rs: Rocketswap):
-        self.rs = rs
 
     def get_graph(self, data):
         df = DataFrame(reversed(data), columns=["DateTime", "Price"])
@@ -304,8 +314,6 @@ if __name__ == '__main__':
     five_days = to_unix_time(now - timedelta(days=5))
     one_month = to_unix_time(now - timedelta(days=30))
 
-    chart = Chart(rs)
-
     external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
     app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
@@ -325,12 +333,18 @@ if __name__ == '__main__':
         ),
 
         html.Div([
+            dcc.Interval(
+                id='interval-component',
+                interval=cf.update_interval,
+                n_intervals=0
+            ),
+
             html.Div([
                 html.H5(children=f"{cf.default_token}-TAU 1 Day", id="price-title-1d", style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-1d',
-                    figure=chart.get_graph(rs.get_token_trades(cf.default_token, one_day)))
+                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, one_day)))  # TODO: Vereinfachen! Beide Objekte sind in 'rs'
             ], className="four columns"),
 
             html.Div([
@@ -338,7 +352,7 @@ if __name__ == '__main__':
 
                 dcc.Graph(
                     id='price-graph-5d',
-                    figure=chart.get_graph(rs.get_token_trades(cf.default_token, five_days)))
+                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, five_days)))
             ], className="four columns"),
 
             html.Div([
@@ -346,7 +360,7 @@ if __name__ == '__main__':
 
                 dcc.Graph(
                     id='price-graph-30d',
-                    figure=chart.get_graph(rs.get_token_trades(cf.default_token, one_month)))
+                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, one_month)))
             ], className="four columns"),
         ], className="row"),
 
@@ -355,10 +369,11 @@ if __name__ == '__main__':
 
             dcc.Graph(
                 id='price-graph-all',
-                figure=chart.get_graph(rs.get_token_trades(cf.default_token)))
+                figure=rs.get_graph(rs.get_token_trades(cf.default_token)))
         ]),
 
         html.Div([
+            html.Label(children=f"Last Update: {str(datetime.now())}", id="last-update", style={"text-align": "center"}),
             html.Label(children=f"{cf.default_token}-TAU Overall", id="label-test", style={"text-align": "center"})
         ]),
     ])
@@ -366,37 +381,72 @@ if __name__ == '__main__':
     @app.callback(
         Output('price-graph-1d', 'figure'),
         Output('price-title-1d', 'children'),
-        Input('token_symbol_input', 'value'))
-    def update_figure(token_symbol):
-        fig = chart.get_graph(rs.get_token_trades(token_symbol, one_day))
-        fig.update_layout(transition_duration=500)
-        return [fig, f"{token_symbol}-TAU 1 Day"]
-
-    @app.callback(
         Output('price-graph-5d', 'figure'),
         Output('price-title-5d', 'children'),
-        Input('token_symbol_input', 'value'))
-    def update_figure(token_symbol):
-        fig = chart.get_graph(rs.get_token_trades(token_symbol, five_days))
-        fig.update_layout(transition_duration=500)
-        return [fig, f"{token_symbol}-TAU 5 Days"]
-
-    @app.callback(
         Output('price-graph-30d', 'figure'),
         Output('price-title-30d', 'children'),
-        Input('token_symbol_input', 'value'))
-    def update_figure(token_symbol):
-        fig = chart.get_graph(rs.get_token_trades(token_symbol, one_month))
-        fig.update_layout(transition_duration=500)
-        return [fig, f"{token_symbol}-TAU 30 Days"]
-
-    @app.callback(
         Output('price-graph-all', 'figure'),
         Output('price-title-all', 'children'),
-        Input('token_symbol_input', 'value'))
-    def update_figure(token_symbol):
-        fig = chart.get_graph(rs.get_token_trades(token_symbol))
-        fig.update_layout(transition_duration=500)
-        return [fig, f"{token_symbol}-TAU Overall"]
+        [Input('interval-component', 'n_intervals'),
+         Input('token_symbol_input', 'value')])
+    def update_graph_on_trade(n, token_symbol):
+        caller_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
+
+        if caller_id == "token_symbol_input" and token_symbol:
+            fig_1d = rs.get_graph(rs.get_token_trades(token_symbol, one_day))
+            fig_1d.update_layout(transition_duration=500)
+            fig_5d = rs.get_graph(rs.get_token_trades(token_symbol, five_days))
+            fig_5d.update_layout(transition_duration=500)
+            fig_30d = rs.get_graph(rs.get_token_trades(token_symbol, one_month))
+            fig_30d.update_layout(transition_duration=500)
+            fig_all = rs.get_graph(rs.get_token_trades(token_symbol))
+            fig_all.update_layout(transition_duration=500)
+
+            return [
+                fig_1d, f"{token_symbol}-TAU 1 Day",
+                fig_5d, f"{token_symbol}-TAU 5 Days",
+                fig_30d, f"{token_symbol}-TAU 30 Days",
+                fig_all, f"{token_symbol}-TAU Overall"
+            ]
+
+        # TODO: Add update of token list if n_interval is 10, 20, 30, ...
+        if caller_id == "interval-component" and n:
+            rs.update_trades()
+
+            if not rs.last_update:
+                raise PreventUpdate
+
+            if hash(rs.last_update) == rs.last_update_id:
+                print("Update aborted")
+                raise PreventUpdate
+
+            print("Hash doesn't match!")
+            rs.last_update_id = hash(rs.last_update)
+
+            for tx in rs.last_update:
+                if tx[1] == rs.selected_token:
+                    print(f"Found new trade with token {rs.selected_token}")
+                    fig_1d = rs.get_graph(rs.get_token_trades(rs.selected_token, one_day))
+                    fig_1d.update_layout(transition_duration=500)
+                    fig_5d = rs.get_graph(rs.get_token_trades(rs.selected_token, five_days))
+                    fig_5d.update_layout(transition_duration=500)
+                    fig_30d = rs.get_graph(rs.get_token_trades(rs.selected_token, one_month))
+                    fig_30d.update_layout(transition_duration=500)
+                    fig_all = rs.get_graph(rs.get_token_trades(rs.selected_token))
+                    fig_all.update_layout(transition_duration=500)
+
+                    return [
+                        fig_1d, f"{rs.selected_token}-TAU 1 Day",
+                        fig_5d, f"{rs.selected_token}-TAU 5 Days",
+                        fig_30d, f"{rs.selected_token}-TAU 30 Days",
+                        fig_all, f"{rs.selected_token}-TAU Overall"
+                    ]
+
+            print("Update aborted")
+            raise PreventUpdate
+
+        else:
+            print("Update aborted")
+            raise PreventUpdate
 
     app.run_server(debug=True)
