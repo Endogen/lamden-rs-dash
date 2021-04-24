@@ -17,7 +17,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 
-# TODO: Add possibility to update DB periodically
 # TODO: Read config from file
 class Config:
     rs_url = "https://stats.rocketswap.exchange:2053/api/"
@@ -316,10 +315,13 @@ if __name__ == '__main__':
 
     external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
-    app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+    app = dash.Dash(
+        __name__,
+        external_stylesheets=external_stylesheets,
+        meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"}])
 
     app.layout = html.Div(children=[
-        html.H1(children='🚀 Rocketswap Dashboard'),
+        html.H1(children='Rocketswap Dashboard 🚀'),
 
         html.Div(children='''
             Choose Lamden Token
