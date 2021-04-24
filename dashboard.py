@@ -1,6 +1,7 @@
 import sqlite3
 import logging
 import requests
+import configparser
 
 import dash
 import dash_core_components as dcc
@@ -17,11 +18,21 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 
-# TODO: Read config from file
 class Config:
-    rs_url = "https://stats.rocketswap.exchange:2053/api/"
-    default_token = "RSWP"
-    update_interval = 5000  # milliseconds
+    def __init__(self):
+        config_parser = configparser.RawConfigParser()
+        cfg_file_path = r"dashboard.cfg"
+        config_parser.read(cfg_file_path)
+        self.cfg_parser = config_parser
+
+    def get(self, param_name):
+        value = self.cfg_parser.get("Rocketswap-Config", param_name)
+
+        try:
+            float(value)
+            return int(float(value)) if float(value).is_integer() else float(value)
+        except:
+            return value
 
 
 # TODO: Rename to 'dashboard.db'
@@ -189,7 +200,7 @@ class Rocketswap:
 
         while call:
             try:
-                url = f"{self.cfg.rs_url}get_trade_history"
+                url = f"{self.cfg.get('rs_url')}get_trade_history"
                 res = requests.get(url, params={"take": take, "skip": skip})
             except Exception as e:
                 logging.error(e)
@@ -224,7 +235,7 @@ class Rocketswap:
 
     def update_token_list(self):
         try:
-            res = requests.get(f"{self.cfg.rs_url}token_list")
+            res = requests.get(f"{self.cfg.get('rs_url')}token_list")
         except Exception as e:
             logging.error(e)
             return
@@ -332,7 +343,7 @@ if __name__ == '__main__':
 
         dcc.Dropdown(
             options=rs.get_token_symbols(),
-            value=cf.default_token,
+            value=cf.get("default_token"),
             multi=False,
             id="token_symbol_input"
         ),
@@ -340,58 +351,58 @@ if __name__ == '__main__':
         html.Div([
             dcc.Interval(
                 id='interval-component',
-                interval=cf.update_interval,
+                interval=cf.get("update_interval"),
                 n_intervals=0
             ),
 
             html.Div([
                 html.H5(
-                    children=f"{cf.default_token}-TAU 1 Day",
+                    children=f"{cf.get('default_token')}-TAU 1 Day",
                     id="price-title-1d",
                     style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-1d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, one_day)))
+                    figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"), one_day)))
             ], className="four columns"),
 
             html.Div([
                 html.H5(
-                    children=f"{cf.default_token}-TAU 5 Days",
+                    children=f"{cf.get('default_token')}-TAU 5 Days",
                     id="price-title-5d",
                     style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-5d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, five_days)))
+                    figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"), five_days)))
             ], className="four columns"),
 
             html.Div([
                 html.H5(
-                    children=f"{cf.default_token}-TAU 30 Days",
+                    children=f"{cf.get('default_token')}-TAU 30 Days",
                     id="price-title-30d",
                     style={"text-align": "center"}),
 
                 dcc.Graph(
                     id='price-graph-30d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.default_token, one_month)))
+                    figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"), one_month)))
             ], className="four columns"),
         ], className="row"),
 
         html.Div([
             html.H5(
-                children=f"{cf.default_token}-TAU Overall",
+                children=f"{cf.get('default_token')}-TAU Overall",
                 id="price-title-all",
                 style={"text-align": "center"}),
 
             dcc.Graph(
                 id='price-graph-all',
-                figure=rs.get_graph(rs.get_token_trades(cf.default_token)))
+                figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"))))
         ]),
 
         html.Div([
             html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"}),
-            #html.Label(children=f"{cf.default_token}-TAU Overall", id="label-test", style={"text-align": "center"})
+            #html.Label(children=f"{cf.get('default_token')}-TAU Overall", id="label-test", style={"text-align": "center"})
         ]),
     ])
 
