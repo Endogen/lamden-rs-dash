@@ -124,13 +124,23 @@ class Database:
         return self.execute(sql)
 
     def select_token_trades(self, token_symbol, start_secs=0):
-        sql = f"" \
+        sql = \
             "SELECT * " \
             "FROM trade_history " \
             f"WHERE token_symbol = ? AND time >= {start_secs} " \
             "ORDER BY time ASC"
 
         return self.execute(sql, token_symbol)
+
+    def select_token_trade_count(self, start_secs: int = 0):
+        sql = \
+            "SELECT token_symbol, count(token_symbol) " \
+            "FROM trade_history " \
+            f"WHERE time > {start_secs} " \
+            "GROUP BY token_symbol " \
+            "ORDER BY count(token_symbol) DESC"
+
+        return self.execute(sql)
 
     def select_token_details(self, token_symbol):
         sql = \
@@ -261,6 +271,15 @@ class Rocketswap:
 
         return data
 
+    def get_token_trade_count(self, start_secs: int = 0):
+        res = self.db.select_token_trade_count(start_secs)
+
+        data = list()
+        for trade in res["data"]:
+            data.append([trade[0], trade[1]])
+
+        return data
+
     def get_token_symbols(self):
         res = db.get_token_symbols()
 
@@ -270,7 +289,7 @@ class Rocketswap:
 
         return data
 
-    def get_graph(self, data):
+    def get_price_graph(self, data):
         df = DataFrame(reversed(data), columns=["DateTime", "Price"])
         df["DateTime"] = pd.to_datetime(df["DateTime"], unit="s")
         df.sort_index(ascending=True, inplace=True)
@@ -286,7 +305,6 @@ class Rocketswap:
             yaxis=dict(
                 gridcolor="rgb(215, 215, 215)",
                 zerolinecolor="rgb(233, 233, 233)",
-                tickprefix="",
                 ticksuffix=" ",
                 autorange=True,
                 fixedrange=False
@@ -298,6 +316,32 @@ class Rocketswap:
         )
 
         return go.Figure(data=[graph], layout=layout)
+
+    def get_trades_graph(self, data):
+        df = DataFrame(reversed(data), columns=["Tokens", "Trades"])
+        df.sort_index(ascending=True, inplace=True)
+
+        graph = go.Bar(x=df.get("Tokens"), y=df.get("Trades"))
+
+        layout = go.Layout(
+            plot_bgcolor='rgb(255,255,255)',
+            xaxis=dict(
+                gridcolor="rgb(215, 215, 215)"
+            ),
+            yaxis=dict(
+                gridcolor="rgb(215, 215, 215)",
+                zerolinecolor="rgb(233, 233, 233)",
+                ticksuffix=" "
+            ),
+            margin=dict(
+                r=25,
+                t=5,
+                b=40)
+        )
+
+        fig = go.Figure(data=[graph], layout=layout)
+
+        return fig
 
 
 class Utils:
@@ -337,6 +381,19 @@ if __name__ == '__main__':
 
         html.Div(children="Choose Lamden Token"),
 
+        html.Div([
+            dcc.Checklist(
+                options=[
+                    {'label': '1 Day', 'value': '1D'},
+                    {'label': '5 Days', 'value': '5D'},
+                    {'label': '30 Days', 'value': '30D'},
+                    {'label': 'Overall', 'value': 'ALL'}
+                ],
+                value=['1D', '5D', '30D', 'ALL'],
+                labelStyle={'display': 'inline-block'}
+            )
+        ]),
+
         dcc.Dropdown(
             options=rs.get_token_symbols(),
             value=cf.get("default_token"),
@@ -359,7 +416,7 @@ if __name__ == '__main__':
 
                 dcc.Graph(
                     id='price-graph-1d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"), one_day)))
+                    figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"), one_day)))
             ], className="four columns"),
 
             html.Div([
@@ -370,7 +427,7 @@ if __name__ == '__main__':
 
                 dcc.Graph(
                     id='price-graph-5d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"), five_days)))
+                    figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"), five_days)))
             ], className="four columns"),
 
             html.Div([
@@ -381,7 +438,7 @@ if __name__ == '__main__':
 
                 dcc.Graph(
                     id='price-graph-30d',
-                    figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"), one_month)))
+                    figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"), one_month)))
             ], className="four columns"),
         ], className="row"),
 
@@ -393,12 +450,23 @@ if __name__ == '__main__':
 
             dcc.Graph(
                 id='price-graph-all',
-                figure=rs.get_graph(rs.get_token_trades(cf.get("default_token"))))
+                figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"))))
         ]),
 
         html.Div([
-            html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"}),
+            html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"})
         ]),
+
+        html.Div([
+            html.H5(
+                children="Trades per Token",
+                id="trades-per-token-title",
+                style={"text-align": "center"}),
+
+            dcc.Graph(
+                id='tx-graph',
+                figure=rs.get_trades_graph(rs.get_token_trade_count(0)))
+        ])
     ])
 
     @app.callback(
@@ -417,13 +485,13 @@ if __name__ == '__main__':
         caller_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
 
         if caller_id == "token_symbol_input" and token_symbol:
-            fig_1d = rs.get_graph(rs.get_token_trades(token_symbol, one_day))
+            fig_1d = rs.get_price_graph(rs.get_token_trades(token_symbol, one_day))
             fig_1d.update_layout(transition_duration=500)
-            fig_5d = rs.get_graph(rs.get_token_trades(token_symbol, five_days))
+            fig_5d = rs.get_price_graph(rs.get_token_trades(token_symbol, five_days))
             fig_5d.update_layout(transition_duration=500)
-            fig_30d = rs.get_graph(rs.get_token_trades(token_symbol, one_month))
+            fig_30d = rs.get_price_graph(rs.get_token_trades(token_symbol, one_month))
             fig_30d.update_layout(transition_duration=500)
-            fig_all = rs.get_graph(rs.get_token_trades(token_symbol))
+            fig_all = rs.get_price_graph(rs.get_token_trades(token_symbol))
             fig_all.update_layout(transition_duration=500)
 
             return [
@@ -450,13 +518,13 @@ if __name__ == '__main__':
                 if tx[1] == rs.selected_token:
                     logging.info(f"New trades found for {rs.selected_token} --> update graph")
 
-                    fig_1d = rs.get_graph(rs.get_token_trades(rs.selected_token, one_day))
+                    fig_1d = rs.get_price_graph(rs.get_token_trades(rs.selected_token, one_day))
                     fig_1d.update_layout(transition_duration=500)
-                    fig_5d = rs.get_graph(rs.get_token_trades(rs.selected_token, five_days))
+                    fig_5d = rs.get_price_graph(rs.get_token_trades(rs.selected_token, five_days))
                     fig_5d.update_layout(transition_duration=500)
-                    fig_30d = rs.get_graph(rs.get_token_trades(rs.selected_token, one_month))
+                    fig_30d = rs.get_price_graph(rs.get_token_trades(rs.selected_token, one_month))
                     fig_30d.update_layout(transition_duration=500)
-                    fig_all = rs.get_graph(rs.get_token_trades(rs.selected_token))
+                    fig_all = rs.get_price_graph(rs.get_token_trades(rs.selected_token))
                     fig_all.update_layout(transition_duration=500)
 
                     rs.last_trade = str(datetime.now())
