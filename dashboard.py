@@ -149,7 +149,6 @@ class Database:
 
     def insert_token(self, contract_name, has_market, base64_png, base64_svg, logo_type,
                      logo_data, token_logo_url, token_name, token_symbol):
-
         sql = \
             "INSERT INTO token_list (contract_name, has_market, token_base64_png, token_base64_svg, " \
             "            logo_type, logo_data, token_logo_url, token_name, token_symbol)" \
@@ -219,7 +218,8 @@ class Rocketswap:
                     )
 
                     new_trades += (trade,)
-                    self.db.insert_trade(*trade)  # TODO: Geht das?
+                    self.db.insert_trade(*trade)
+                    logging.info(f"New trade: {tx}")
                 else:
                     call = False
                     break
@@ -229,8 +229,6 @@ class Rocketswap:
 
             if len(res.json()) != take:
                 call = False
-
-            print(self.last_update, "\n")  # TODO: TEMP
 
     def update_token_list(self):
         try:
@@ -299,8 +297,7 @@ class Rocketswap:
                 b=40)
         )
 
-        fig = go.Figure(data=[graph], layout=layout)
-        return fig
+        return go.Figure(data=[graph], layout=layout)
 
 
 class Utils:
@@ -326,11 +323,9 @@ if __name__ == '__main__':
     five_days = Utils.to_unix_time(now - timedelta(days=5))
     one_month = Utils.to_unix_time(now - timedelta(days=30))
 
-    external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-
     app = dash.Dash(
         __name__,
-        external_stylesheets=external_stylesheets,
+        external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'],
         meta_tags=[{
             "name": "viewport",
             "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"
@@ -340,7 +335,7 @@ if __name__ == '__main__':
     app.layout = html.Div(children=[
         html.H1(children='Rocketswap Dashboard 🚀'),
 
-        html.Div(children="Choose Lamden Token"),  # TODO: Passendes Input-Label verwenden?
+        html.Div(children="Choose Lamden Token"),
 
         dcc.Dropdown(
             options=rs.get_token_symbols(),
@@ -403,7 +398,6 @@ if __name__ == '__main__':
 
         html.Div([
             html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"}),
-            #html.Label(children=f"{cf.get('default_token')}-TAU Overall", id="label-test", style={"text-align": "center"})
         ]),
     ])
 
@@ -448,15 +442,14 @@ if __name__ == '__main__':
                 raise PreventUpdate
 
             if hash(rs.last_update) == rs.last_update_id:
-                print("Update aborted")
                 raise PreventUpdate
 
-            print("Hash doesn't match!")
             rs.last_update_id = hash(rs.last_update)
 
             for tx in rs.last_update:
                 if tx[1] == rs.selected_token:
-                    print(f"Found new trade with token {rs.selected_token}")
+                    logging.info(f"New trades found for {rs.selected_token} --> update graph")
+
                     fig_1d = rs.get_graph(rs.get_token_trades(rs.selected_token, one_day))
                     fig_1d.update_layout(transition_duration=500)
                     fig_5d = rs.get_graph(rs.get_token_trades(rs.selected_token, five_days))
@@ -476,11 +469,9 @@ if __name__ == '__main__':
                         f"Last Trade: {rs.last_trade}"
                     ]
 
-            print("Update aborted")
             raise PreventUpdate
 
         else:
-            print("Update aborted")
             raise PreventUpdate
 
     app.run_server(debug=True)
