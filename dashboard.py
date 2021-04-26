@@ -317,11 +317,17 @@ class Rocketswap:
 
         return go.Figure(data=[graph], layout=layout)
 
-    def get_trades_graph(self, data):
+    def get_trades_graph(self, data, selected_token):
         df = DataFrame(reversed(data), columns=["Tokens", "Trades"])
         df.sort_index(ascending=True, inplace=True)
 
-        graph = go.Bar(x=df.get("Tokens"), y=df.get("Trades"))
+        colors = ["blue", ] * len(data)
+
+        for i, d in enumerate(reversed(data)):
+            if d[0] == selected_token:
+                colors[i] = "crimson"
+
+        graph = go.Bar(x=df.get("Tokens"), y=df.get("Trades"), marker_color=colors)
 
         layout = go.Layout(
             plot_bgcolor='rgb(255,255,255)',
@@ -464,8 +470,8 @@ if __name__ == '__main__':
                 style={"text-align": "center"}),
 
             dcc.Graph(
-                id='tx-graph',
-                figure=rs.get_trades_graph(rs.get_token_trade_count(0)))
+                id='trades-graph',
+                figure=rs.get_trades_graph(rs.get_token_trade_count(0), rs.selected_token))
         ])
     ])
 
@@ -479,6 +485,7 @@ if __name__ == '__main__':
         Output('price-graph-all', 'figure'),
         Output('price-title-all', 'children'),
         Output('last-trade', 'children'),
+        Output('trades-graph', 'figure'),
         [Input('interval-component', 'n_intervals'),
          Input('token_symbol_input', 'value')])
     def update_graph(n, token_symbol):
@@ -493,13 +500,16 @@ if __name__ == '__main__':
             fig_30d.update_layout(transition_duration=500)
             fig_all = rs.get_price_graph(rs.get_token_trades(token_symbol))
             fig_all.update_layout(transition_duration=500)
+            fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), rs.selected_token)
+            fig_trades.update_layout(transition_duration=500)
 
             return [
                 fig_1d, f"{token_symbol}-TAU 1 Day",
                 fig_5d, f"{token_symbol}-TAU 5 Days",
                 fig_30d, f"{token_symbol}-TAU 30 Days",
                 fig_all, f"{token_symbol}-TAU Overall",
-                f"Last Trade: {rs.last_trade}"
+                f"Last Trade: {rs.last_trade}",
+                fig_trades
             ]
 
         # TODO: Add update of token list if n_interval is 10, 20, 30, ...
@@ -526,6 +536,8 @@ if __name__ == '__main__':
                     fig_30d.update_layout(transition_duration=500)
                     fig_all = rs.get_price_graph(rs.get_token_trades(rs.selected_token))
                     fig_all.update_layout(transition_duration=500)
+                    fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), rs.selected_token)
+                    fig_trades.update_layout(transition_duration=500)
 
                     rs.last_trade = str(datetime.now())
 
@@ -534,7 +546,8 @@ if __name__ == '__main__':
                         fig_5d, f"{rs.selected_token}-TAU 5 Days",
                         fig_30d, f"{rs.selected_token}-TAU 30 Days",
                         fig_all, f"{rs.selected_token}-TAU Overall",
-                        f"Last Trade: {rs.last_trade}"
+                        f"Last Trade: {rs.last_trade}",
+                        fig_trades
                     ]
 
             raise PreventUpdate
