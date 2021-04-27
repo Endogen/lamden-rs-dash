@@ -610,10 +610,8 @@ if __name__ == '__main__':
         Input('select-visible', 'value'))
     def update_visibility_30d(value):
         if "30D" in value:
-            data = {"30D": True}
             return {'display': 'inline'}
         else:
-            data = {"30D": False}
             return {'display': 'none'}
 
     @app.callback(
