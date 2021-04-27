@@ -10,7 +10,7 @@ import dash_html_components as html
 import plotly.graph_objs as go
 import pandas as pd
 
-from dash.dependencies import Output, Input
+from dash.dependencies import Output, Input, State
 from dash.exceptions import PreventUpdate
 from pandas import DataFrame
 from pathlib import Path
@@ -102,7 +102,7 @@ class Database:
 
         sql = \
             "CREATE TABLE token_list (" \
-            "   contract_name TEXT NOT NULL," \
+            "   contract_name TEXT NOT NULL PRIMARY KEY," \
             "   has_market TEXT," \
             "   token_base64_png TEXT," \
             "   token_base64_svg TEXT," \
@@ -114,6 +114,17 @@ class Database:
             ")"
 
         return self.execute(sql)
+
+    def token_exists(self, contract_name):
+        sql = \
+            "SELECT EXISTS (" \
+            "   SELECT 1 " \
+            "   FROM token_list " \
+            "   WHERE contract_name = ?" \
+            ")"
+
+        result = self.execute(sql, contract_name)
+        return True if result["data"][0][0] == 1 else False
 
     def select_last_trade(self):
         sql = \
@@ -159,6 +170,10 @@ class Database:
 
     def insert_token(self, contract_name, has_market, base64_png, base64_svg, logo_type,
                      logo_data, token_logo_url, token_name, token_symbol):
+
+        if self.token_exists(contract_name):
+            return
+
         sql = \
             "INSERT INTO token_list (contract_name, has_market, token_base64_png, token_base64_svg, " \
             "            logo_type, logo_data, token_logo_url, token_name, token_symbol)" \
@@ -208,7 +223,7 @@ class Rocketswap:
 
         while call:
             try:
-                url = f"{self.cfg.get('rs_url')}get_trade_history"
+                url = f"{self.cfg.get('rocketswap_url')}get_trade_history"
                 res = requests.get(url, params={"take": take, "skip": skip})
             except Exception as e:
                 logging.error(e)
@@ -240,9 +255,9 @@ class Rocketswap:
             if len(res.json()) != take:
                 call = False
 
-    def update_token_list(self):
+    def update_tokens(self):
         try:
-            res = requests.get(f"{self.cfg.get('rs_url')}token_list")
+            res = requests.get(f"{self.cfg.get('rocketswap_url')}token_list")
         except Exception as e:
             logging.error(e)
             return
@@ -321,7 +336,7 @@ class Rocketswap:
         df = DataFrame(reversed(data), columns=["Tokens", "Trades"])
         df.sort_index(ascending=True, inplace=True)
 
-        colors = ["blue", ] * len(data)
+        colors = ["rgb(84, 95, 249)", ] * len(data)
 
         for i, d in enumerate(reversed(data)):
             if d[0] == selected_token:
@@ -364,7 +379,7 @@ if __name__ == '__main__':
     cf = Config()
 
     rs = Rocketswap(cf, db)
-    rs.update_token_list()
+    rs.update_tokens()
     rs.update_trades()
 
     now = datetime.utcnow()
@@ -383,19 +398,23 @@ if __name__ == '__main__':
     )
 
     app.layout = html.Div(children=[
+        dcc.Store(id='local', storage_type='local'),
+
         html.H1(children='Rocketswap Dashboard 🚀'),
 
         html.Div(children="Choose Lamden Token"),
 
         html.Div([
             dcc.Checklist(
+                id="select-visible",
                 options=[
                     {'label': '1 Day', 'value': '1D'},
                     {'label': '5 Days', 'value': '5D'},
                     {'label': '30 Days', 'value': '30D'},
-                    {'label': 'Overall', 'value': 'ALL'}
+                    {'label': 'Overall', 'value': 'ALL'},
+                    {'label': 'Trades', 'value': 'TRADES'}
                 ],
-                value=['1D', '5D', '30D', 'ALL'],
+                value=['1D', '5D', '30D', 'ALL', 'TRADES'],
                 labelStyle={'display': 'inline-block'}
             )
         ]),
@@ -407,13 +426,13 @@ if __name__ == '__main__':
             id="token_symbol_input"
         ),
 
-        html.Div([
-            dcc.Interval(
-                id='interval-component',
-                interval=cf.get("update_interval"),
-                n_intervals=0
-            ),
+        dcc.Interval(
+            id='interval-component',
+            interval=cf.get("update_interval"),
+            n_intervals=0
+        ),
 
+        html.Div([
             html.Div([
                 html.H5(
                     children=f"{cf.get('default_token')}-TAU 1 Day",
@@ -423,7 +442,7 @@ if __name__ == '__main__':
                 dcc.Graph(
                     id='price-graph-1d',
                     figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"), one_day)))
-            ], className="four columns"),
+            ], id="div-1d", className="four columns"),
 
             html.Div([
                 html.H5(
@@ -434,7 +453,7 @@ if __name__ == '__main__':
                 dcc.Graph(
                     id='price-graph-5d',
                     figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"), five_days)))
-            ], className="four columns"),
+            ], id="div-5d", className="four columns"),
 
             html.Div([
                 html.H5(
@@ -445,7 +464,7 @@ if __name__ == '__main__':
                 dcc.Graph(
                     id='price-graph-30d',
                     figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"), one_month)))
-            ], className="four columns"),
+            ], id="div-30d", className="four columns"),
         ], className="row"),
 
         html.Div([
@@ -457,7 +476,7 @@ if __name__ == '__main__':
             dcc.Graph(
                 id='price-graph-all',
                 figure=rs.get_price_graph(rs.get_token_trades(cf.get("default_token"))))
-        ]),
+        ], id="div-all"),
 
         html.Div([
             html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"})
@@ -472,7 +491,7 @@ if __name__ == '__main__':
             dcc.Graph(
                 id='trades-graph',
                 figure=rs.get_trades_graph(rs.get_token_trade_count(0), rs.selected_token))
-        ])
+        ], id="div-trades")
     ])
 
     @app.callback(
@@ -555,4 +574,64 @@ if __name__ == '__main__':
         else:
             raise PreventUpdate
 
-    app.run_server(debug=True)
+    @app.callback(
+        Output('div-1d', 'style'),
+        Output('div-1d', 'className'),
+        Output('div-5d', 'className'),
+        Output('div-30d', 'className'),
+        Input('select-visible', 'value'))
+    def update_visibility_1d(value):
+        if "1D" in value:
+            return [
+                {'display': 'inline'},
+                "four columns",
+                "four columns",
+                "four columns"
+            ]
+        else:
+            return [
+                {'display': 'none'},
+                "six columns",
+                "six columns",
+                "six columns"
+            ]
+
+    @app.callback(
+        Output('div-5d', 'style'),
+        Input('select-visible', 'value'))
+    def update_visibility_5d(value):
+        if "5D" in value:
+            return {'display': 'inline'}
+        else:
+            return {'display': 'none'}
+
+    @app.callback(
+        Output('div-30d', 'style'),
+        Input('select-visible', 'value'))
+    def update_visibility_30d(value):
+        if "30D" in value:
+            data = {"30D": True}
+            return {'display': 'inline'}
+        else:
+            data = {"30D": False}
+            return {'display': 'none'}
+
+    @app.callback(
+        Output('div-all', 'style'),
+        Input('select-visible', 'value'))
+    def update_visibility_all(value):
+        if "ALL" in value:
+            return {'display': 'inline'}
+        else:
+            return {'display': 'none'}
+
+    @app.callback(
+        Output('div-trades', 'style'),
+        Input('select-visible', 'value'))
+    def update_visibility_trades(value):
+        if "TRADES" in value:
+            return {'display': 'inline'}
+        else:
+            return {'display': 'none'}
+
+    app.run_server(debug=True, threaded=True, port=cf.get('url_port'))
