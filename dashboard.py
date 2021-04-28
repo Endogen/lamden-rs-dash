@@ -2,6 +2,7 @@ import os
 import base64
 import sqlite3
 import logging
+
 import requests
 import configparser
 
@@ -19,6 +20,7 @@ from pandas import DataFrame
 from pathlib import Path
 from distutils.util import strtobool
 from datetime import datetime, timedelta
+from functools import wraps
 
 
 class Config:
@@ -216,6 +218,8 @@ class Rocketswap:
 
         self._last_trade_date = "N/A"
 
+        self.tmp_value = 0.01
+
     def set_selected_token(self, token_symbol):
         self._selected_token = token_symbol
 
@@ -247,16 +251,30 @@ class Rocketswap:
         take = 50
         call = True
 
+        import time
+
         while call:
             try:
-                url = f"{self._cfg.get('rocketswap_url')}get_trade_history"
-                res = requests.get(url, params={"take": take, "skip": skip}, timeout=3)
+                #url = f"{self._cfg.get('rocketswap_url')}get_trade_history"
+                #res = requests.get(url, params={"take": take, "skip": skip}, timeout=3)
+
+                self.tmp_value = self.tmp_value + 0.01
+
+                res = [{
+                    'contract_name': 'con_doug_lst001',
+                    'token_symbol': 'DOUG',
+                    'price': str(self.tmp_value),
+                    'time': int(time.time()),
+                    'type': 'buy'
+                }]
+
             except Exception as e:
                 logging.error(e)
                 return
 
             trades_api = list()
-            for t in res.json():
+            #for t in res.json():
+            for t in res:
                 if t not in trades_api:
                     trades_api.append(t)
 
@@ -285,7 +303,8 @@ class Rocketswap:
                 self._last_update = new_trades
                 print("last_update set to:", self._last_update)
 
-            if len(res.json()) != take:
+            if len(res) != take:
+            #if len(res.json()) != take:
                 call = False
 
     def update_tokens(self):
@@ -431,7 +450,8 @@ class Dashboard:
             meta_tags=[{
                 "name": "viewport",
                 "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"
-            }]
+            }],
+            prevent_initial_callbacks=True
         )
 
         app.layout = html.Div(children=[
@@ -533,6 +553,16 @@ class Dashboard:
             ], id="div-trades")
         ])
 
+        def avoid_untriggered_call(f):
+            @wraps(f)
+            def helper(*args, **kwargs):
+                if not dash.callback_context.triggered:
+                    return dash.no_update
+                return f(*args, **kwargs)
+
+            return helper
+
+        @avoid_untriggered_call
         @app.callback(
             Output('price-graph-1d', 'figure'),
             Output('price-title-1d', 'children'),
@@ -544,8 +574,8 @@ class Dashboard:
             Output('price-title-all', 'children'),
             Output('last-trade', 'children'),
             Output('trades-graph', 'figure'),
-            [Input('interval-component', 'n_intervals'),
-             Input('token_symbol_input', 'value')])
+            Input('interval-component', 'n_intervals'),
+            Input('token_symbol_input', 'value'))
         def update_graph(n, token_symbol):
             caller_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
             print(f"In update. caller {caller_id} with params: ", n, token_symbol)
@@ -574,55 +604,50 @@ class Dashboard:
                     fig_trades
                 ]
 
-            # TODO: Add update of token list if n_interval is 10, 20, 30, ...
-            elif caller_id == "interval-component" and n:
-                rs.update_trades()
+            rs.update_trades()
 
-                if not rs.get_last_update():
-                    print("No last_update, exiting update")
-                    raise PreventUpdate
-
-                if hash(rs.get_last_update()) == rs.get_last_update_id():
-                    print("Hash matches, exiting update")
-                    raise PreventUpdate
-
-                rs.set_last_update_id(hash(rs.get_last_update()))
-                print("set new update to:", rs.get_last_update())
-
-                for tx in rs.get_last_update():
-                    print("Checking trade:", tx)
-
-                    if tx[1] == rs.get_selected_token():
-                        print("Trade matches selected token, updating and returning graphs")
-                        logging.info(f"Graphs for token {rs.get_selected_token()} updated")
-
-                        fig_1d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_day))
-                        fig_1d.update_layout(transition_duration=500)
-                        fig_5d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), five_days))
-                        fig_5d.update_layout(transition_duration=500)
-                        fig_30d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_month))
-                        fig_30d.update_layout(transition_duration=500)
-                        fig_all = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token()))
-                        fig_all.update_layout(transition_duration=500)
-                        fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), rs.get_selected_token())
-                        fig_trades.update_layout(transition_duration=500)
-
-                        rs.set_last_trade_date(str(datetime.now()))
-
-                        return [
-                            fig_1d, f"{rs.get_selected_token()}-TAU 1 Day",
-                            fig_5d, f"{rs.get_selected_token()}-TAU 5 Days",
-                            fig_30d, f"{rs.get_selected_token()}-TAU 30 Days",
-                            fig_all, f"{rs.get_selected_token()}-TAU Max",
-                            f"Last Trade: {rs.get_last_trade_date()}",
-                            fig_trades
-                        ]
-
-                print("No trade matches selected token, existing")
+            if not rs.get_last_update():
+                print("No last_update, exiting update")
                 raise PreventUpdate
-            else:
-                print("Unknown caller, exiting")
+
+            if hash(rs.get_last_update()) == rs.get_last_update_id():
+                print("Hash matches, exiting update")
                 raise PreventUpdate
+
+            rs.set_last_update_id(hash(rs.get_last_update()))
+            print("set new update to:", rs.get_last_update())
+
+            for tx in rs.get_last_update():
+                print("Checking trade:", tx)
+
+                if tx[1] == rs.get_selected_token():
+                    print("Trade matches selected token, updating and returning graphs")
+                    logging.info(f"Graphs for token {rs.get_selected_token()} updated")
+
+                    fig_1d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_day))
+                    fig_1d.update_layout(transition_duration=500)
+                    fig_5d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), five_days))
+                    fig_5d.update_layout(transition_duration=500)
+                    fig_30d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_month))
+                    fig_30d.update_layout(transition_duration=500)
+                    fig_all = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token()))
+                    fig_all.update_layout(transition_duration=500)
+                    fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), rs.get_selected_token())
+                    fig_trades.update_layout(transition_duration=500)
+
+                    rs.set_last_trade_date(str(datetime.now()))
+
+                    return [
+                        fig_1d, f"{rs.get_selected_token()}-TAU 1 Day",
+                        fig_5d, f"{rs.get_selected_token()}-TAU 5 Days",
+                        fig_30d, f"{rs.get_selected_token()}-TAU 30 Days",
+                        fig_all, f"{rs.get_selected_token()}-TAU Max",
+                        f"Last Trade: {rs.get_last_trade_date()}",
+                        fig_trades
+                    ]
+
+            print("No trade matches selected token, existing")
+            raise PreventUpdate
 
         @app.callback(
             Output('div-1d', 'style'),
