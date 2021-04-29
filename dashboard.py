@@ -1,5 +1,4 @@
 import os
-import base64
 import sqlite3
 import logging
 
@@ -20,7 +19,6 @@ from pandas import DataFrame
 from pathlib import Path
 from distutils.util import strtobool
 from datetime import datetime, timedelta
-from functools import wraps
 
 
 class Config:
@@ -220,6 +218,9 @@ class Rocketswap:
 
         self.tmp_value = 0.01
 
+    def get_selected_token(self):
+        return self._selected_token
+
     def set_selected_token(self, token_symbol):
         self._selected_token = token_symbol
 
@@ -229,9 +230,6 @@ class Rocketswap:
             self._selected_token_data = res["data"][0]
         else:
             self._selected_token_data = None
-
-    def get_selected_token(self):
-        return self._selected_token
 
     def get_last_trade_date(self):
         return self._last_trade_date
@@ -427,12 +425,6 @@ class Utils:
     def to_unix_time(date_time):
         return int((date_time - datetime(1970, 1, 1)).total_seconds())
 
-    # TODO: Needed?
-    @staticmethod
-    def b64_image(image_data):
-        #return 'data:image/png;base64,' + base64.b64encode(image_data).decode('utf-8')
-        return 'data:image/png;base64,' + image_data
-
 
 class Dashboard:
 
@@ -553,16 +545,6 @@ class Dashboard:
             ], id="div-trades")
         ])
 
-        def avoid_untriggered_call(f):
-            @wraps(f)
-            def helper(*args, **kwargs):
-                if not dash.callback_context.triggered:
-                    return dash.no_update
-                return f(*args, **kwargs)
-
-            return helper
-
-        @avoid_untriggered_call
         @app.callback(
             Output('price-graph-1d', 'figure'),
             Output('price-title-1d', 'children'),
@@ -592,7 +574,7 @@ class Dashboard:
                 fig_30d.update_layout(transition_duration=500)
                 fig_all = rs.get_price_graph(rs.get_token_trades(token_symbol))
                 fig_all.update_layout(transition_duration=500)
-                fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), rs.get_selected_token())
+                fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), token_symbol)
                 fig_trades.update_layout(transition_duration=500)
 
                 return [
@@ -605,17 +587,20 @@ class Dashboard:
                 ]
 
             rs.update_trades()
+            print("Trades updated")
 
+            """            
             if not rs.get_last_update():
                 print("No last_update, exiting update")
                 raise PreventUpdate
+            """
 
             if hash(rs.get_last_update()) == rs.get_last_update_id():
                 print("Hash matches, exiting update")
                 raise PreventUpdate
 
             rs.set_last_update_id(hash(rs.get_last_update()))
-            print("set new update to:", rs.get_last_update())
+            print("Set last_update_id to:", rs.get_last_update_id())
 
             for tx in rs.get_last_update():
                 print("Checking trade:", tx)
@@ -646,7 +631,7 @@ class Dashboard:
                         fig_trades
                     ]
 
-            print("No trade matches selected token, existing")
+            print("No trade matches selected token, exiting")
             raise PreventUpdate
 
         @app.callback(
