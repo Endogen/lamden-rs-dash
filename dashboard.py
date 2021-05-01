@@ -1,4 +1,3 @@
-import os
 import sqlite3
 import logging
 
@@ -12,18 +11,27 @@ import dash_html_components as html
 import plotly.graph_objs as go
 import pandas as pd
 
-from dash.dependencies import Output, Input, State
-from dash.exceptions import PreventUpdate
+from dash.dependencies import Output, Input
 
 from pandas import DataFrame
 from pathlib import Path
 from distutils.util import strtobool
 from datetime import datetime, timedelta
 
+app = dash.Dash(
+    __name__,
+    external_stylesheets=['style.css'],
+    title="Rocketswap Dashboard",
+    meta_tags=[{
+        "name": "viewport",
+        "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"
+    }]
+)
+
 
 class Config:
     def __init__(self, cfg_path: str = None):
-        cfg_path = cfg_path if cfg_path else os.path.join("assets", "config.cfg")
+        cfg_path = cfg_path if cfg_path else app.get_asset_url("config.cfg")[1:]
         self._cfg_parser = configparser.RawConfigParser()
         self._cfg_parser.read(cfg_path)
 
@@ -39,9 +47,12 @@ class Config:
             return value
 
 
+cfg = Config()
+
+
 class Database:
     def __init__(self, db_path: str = None):
-        self._db_path = db_path if db_path else os.path.join("assets", "database.db")
+        self._db_path = db_path if db_path else app.get_asset_url("database.db")[1:]
 
     def execute(self, sql_statement, *args):
         res = {"success": None, "data": None}
@@ -78,12 +89,20 @@ class Database:
             "FROM sqlite_master " \
             "WHERE type = 'table' AND name = ?"
 
-        exists = False
-
         if self.execute(sql, table_name)["data"]:
-            exists = True
+            return True
+        return False
 
-        return exists
+    def token_exists(self, contract_name):
+        sql = \
+            "SELECT EXISTS (" \
+            "   SELECT 1 " \
+            "   FROM token_list " \
+            "   WHERE contract_name = ?" \
+            ")"
+
+        result = self.execute(sql, contract_name)
+        return True if result["data"][0][0] == 1 else False
 
     def create_trade_history(self):
         if self.table_exists("trade_history"):
@@ -119,17 +138,6 @@ class Database:
 
         return self.execute(sql)
 
-    def token_exists(self, contract_name):
-        sql = \
-            "SELECT EXISTS (" \
-            "   SELECT 1 " \
-            "   FROM token_list " \
-            "   WHERE contract_name = ?" \
-            ")"
-
-        result = self.execute(sql, contract_name)
-        return True if result["data"][0][0] == 1 else False
-
     def select_last_trade(self):
         sql = \
             "SELECT * " \
@@ -138,7 +146,7 @@ class Database:
 
         return self.execute(sql)
 
-    def select_token_trades(self, token_symbol, start_secs=0):
+    def select_trades(self, token_symbol, start_secs=0):
         sql = \
             "SELECT * " \
             "FROM trade_history " \
@@ -147,7 +155,7 @@ class Database:
 
         return self.execute(sql, token_symbol)
 
-    def select_token_trade_count(self, start_secs: int = 0):
+    def select_trade_count(self, start_secs: int = 0):
         sql = \
             "SELECT token_symbol, count(token_symbol) " \
             "FROM trade_history " \
@@ -157,7 +165,7 @@ class Database:
 
         return self.execute(sql)
 
-    def select_token_data(self, token_symbol):
+    def select_contract(self, token_symbol):
         sql = \
             "SELECT * " \
             "FROM token_list " \
@@ -195,7 +203,7 @@ class Database:
             token_name,
             token_symbol)
 
-    def get_token_symbols(self):
+    def select_symbols(self):
         sql = \
             "SELECT DISTINCT token_symbol " \
             "FROM trade_history"
@@ -203,118 +211,82 @@ class Database:
         return self.execute(sql)
 
 
-class Rocketswap:
-    def __init__(self, cfg: Config, db: Database):
-        self._cfg = cfg
-        self._db = db
+db = Database()
+db.create_token_list()
+db.create_trade_history()
 
-        self._last_update = tuple()
-        self._last_update_id = None
 
-        self._selected_token = cfg.get("default_token")
-        self._selected_token_data = None
+def to_unix_time(date_time):
+    return int((date_time - datetime(1970, 1, 1)).total_seconds())
 
-        self._last_trade_date = "N/A"
 
-        self.tmp_value = 0.01
+d1 = to_unix_time(datetime.utcnow() - timedelta(days=1))
+d5 = to_unix_time(datetime.utcnow() - timedelta(days=5))
+m1 = to_unix_time(datetime.utcnow() - timedelta(days=30))
 
-    def get_selected_token(self):
-        return self._selected_token
 
-    def set_selected_token(self, token_symbol):
-        self._selected_token = token_symbol
-
-        res = db.select_token_data(token_symbol)
-
-        if res and res["data"]:
-            self._selected_token_data = res["data"][0]
-        else:
-            self._selected_token_data = None
-
-    def get_last_trade_date(self):
-        return self._last_trade_date
-
-    def set_last_trade_date(self, new_date):
-        self._last_trade_date = new_date
+class Dashboard:
+    def __init__(self):
+        self.selected_token = cfg.get("default_token")
 
     def update_trades(self):
-        res = self._db.select_last_trade()
+        res = db.select_last_trade()
 
         if res and res["data"]:
             last_secs = res["data"][0][3]
         else:
             last_secs = 0
 
-        skip = 0
-        take = 50
-        call = True
+        trades = list()
 
-        import time
+        skip = 0
+        take = 10
+        call = True
 
         while call:
             try:
-                #url = f"{self._cfg.get('rocketswap_url')}get_trade_history"
-                #res = requests.get(url, params={"take": take, "skip": skip}, timeout=3)
-
-                self.tmp_value = self.tmp_value + 0.01
-
-                res = [{
-                    'contract_name': 'con_doug_lst001',
-                    'token_symbol': 'DOUG',
-                    'price': str(self.tmp_value),
-                    'time': int(time.time()),
-                    'type': 'buy'
-                }]
-
+                url = f"{cfg.get('rocketswap_url')}get_trade_history"
+                res = requests.get(url, params={"take": take, "skip": skip}, timeout=2)
             except Exception as e:
                 logging.error(e)
                 return
 
-            trades_api = list()
-            #for t in res.json():
-            for t in res:
-                if t not in trades_api:
-                    trades_api.append(t)
-
             skip += take
 
-            new_trades = tuple()
-            for tx in trades_api:
+            for tx in res.json():
                 if tx["time"] > last_secs:
-                    trade = (
-                        tx["contract_name"],
-                        tx["token_symbol"],
-                        tx["price"],
-                        tx["time"],
-                        tx["type"]
-                    )
+                    if tx not in trades:
+                        trade = [
+                            tx["contract_name"],
+                            tx["token_symbol"],
+                            tx["price"],
+                            tx["time"],
+                            tx["type"]
+                        ]
 
-                    new_trades += (trade,)
-                    self._db.insert_trade(*trade)
-                    print("New trade:", tx)
-                    logging.info(f"New trade: {tx}")
+                        trades.append(trade)
+                        db.insert_trade(*trade)
+                        print("New trade:", tx)
+                        logging.info(f"New trade: {tx}")
                 else:
                     call = False
                     break
 
-            if new_trades:
-                self._last_update = new_trades
-                print("last_update set to:", self._last_update)
-
-            if len(res) != take:
-            #if len(res.json()) != take:
+            if len(res.json()) != take:
                 call = False
+
+        return trades
 
     def update_tokens(self):
         try:
-            url = f"{self._cfg.get('rocketswap_url')}token_list"
-            res = requests.get(url, timeout=3)
+            url = f"{cfg.get('rocketswap_url')}token_list"
+            res = requests.get(url, timeout=2)
         except Exception as e:
             logging.error(e)
             return
 
         for tk in res.json():
-            self._db.insert_token(
+            db.insert_token(
                 tk["contract_name"],
                 tk["has_market"],
                 tk["token_base64_png"],
@@ -325,25 +297,16 @@ class Rocketswap:
                 tk["token_name"],
                 tk["token_symbol"])
 
-    def get_last_update(self):
-        return self._last_update
-
-    def get_last_update_id(self):
-        return self._last_update_id
-
-    def set_last_update_id(self, new_id):
-        self._last_update_id = new_id
-
-    def get_token_trades(self, token_symbol, start_secs: int = 0):
+    def get_trades(self, start_secs: int = 0):
         data = list()
 
-        for trade in self._db.select_token_trades(token_symbol, start_secs)["data"]:
+        for trade in db.select_trades(self.selected_token, start_secs)["data"]:
             data.append([trade[3], trade[2]])
 
         return data
 
-    def get_token_trade_count(self, start_secs: int = 0):
-        res = self._db.select_token_trade_count(start_secs)
+    def get_trade_count(self, start_secs: int = 0):
+        res = db.select_trade_count(start_secs)
 
         data = list()
         for trade in res["data"]:
@@ -351,14 +314,22 @@ class Rocketswap:
 
         return data
 
-    def get_all_token_symbols(self):
-        res = db.get_token_symbols()
+    def get_symbols(self):
+        res = db.select_symbols()
 
         data = list()
         for ts in res["data"]:
             data.append({"label": ts[0], "value": ts[0]})
 
         return data
+
+    def get_contract(self):
+        res = db.select_contract(self.selected_token)
+
+        if res["data"] and res["data"][0]:
+            return res["data"][0][0]
+        else:
+            return "-"
 
     def get_price_graph(self, data):
         df = DataFrame(reversed(data), columns=["DateTime", "Price"])
@@ -388,17 +359,16 @@ class Rocketswap:
 
         return go.Figure(data=[graph], layout=layout)
 
-    def get_trades_graph(self, data, selected_token):
+    def get_trades_graph(self, data):
         df = DataFrame(reversed(data), columns=["Tokens", "Trades"])
         df.sort_index(ascending=True, inplace=True)
 
         colors = ["rgb(84, 95, 249)", ] * len(data)
 
         for i, d in enumerate(reversed(data)):
-            if d[0] == selected_token:
+            if d[0] == self.selected_token:
                 colors[i] = "crimson"
 
-        # TODO: Hier gab es bei der alten Version keine Warning?
         graph = go.Bar(x=df.get("Tokens"), y=df.get("Trades"), marker_color=colors)
 
         layout = go.Layout(
@@ -420,290 +390,201 @@ class Rocketswap:
         return go.Figure(data=[graph], layout=layout)
 
 
-class Utils:
-    @staticmethod
-    def to_unix_time(date_time):
-        return int((date_time - datetime(1970, 1, 1)).total_seconds())
+ds = Dashboard()
 
 
-class Dashboard:
+app.layout = html.Div(children=[
+    dcc.Store(
+        id='storage',
+        storage_type='local'
+    ),
 
-    def __init__(self, cf: Config, rs: Rocketswap):
-        now = datetime.utcnow()
+    dcc.Interval(
+        id='interval-component',
+        interval=cfg.get("update_interval"),
+        n_intervals=0
+    ),
 
-        one_day = Utils.to_unix_time(now - timedelta(days=1))
-        five_days = Utils.to_unix_time(now - timedelta(days=5))
-        one_month = Utils.to_unix_time(now - timedelta(days=30))
+    html.Div([
+        html.Div([
+            dcc.Dropdown(
+                options=ds.get_symbols(),
+                value=ds.selected_token,
+                multi=False,
+                id="token-input"
+            )
+        ], id="div-token-input", className="four columns"),
 
-        app = dash.Dash(
-            __name__,
-            external_stylesheets=['style.css'],
-            title="Rocketswap Dashboard",
-            meta_tags=[{
-                "name": "viewport",
-                "content": "width=device-width, initial-scale=1.0, maximum-scale=1.2, minimum-scale=0.5"
-            }],
-            prevent_initial_callbacks=True
-        )
+        html.Div([
+            html.Label(
+                children=ds.get_contract(),
+                id="contract-label",
+                style={"text-align": "center"}
+            )
+        ], id="div-contract-label", className="four columns"),
 
-        app.layout = html.Div(children=[
-            dcc.Store(id='local', storage_type='local'),
-
-            dcc.Interval(
-                id='interval-component',
-                interval=cf.get("update_interval"),
-                n_intervals=0
-            ),
-
+        html.Div([
             dcc.Checklist(
                 id="select-visible",
                 options=[
                     {'label': '1D', 'value': '1D'},
                     {'label': '5D', 'value': '5D'},
                     {'label': '30D', 'value': '30D'},
-                    {'label': 'Max', 'value': 'MAX'},
                     {'label': 'Trades', 'value': 'TRADES'}
                 ],
-                value=['1D', '5D', '30D', 'MAX', 'TRADES'],
-                labelStyle={'display': 'inline-block'}
+                value=['1D', '5D', '30D', 'TRADES'],
+                labelStyle={'display': 'inline-block'},
+                style={"text-align": "right"}
+            )
+        ], id="div-select-visible", className="four columns"),
+
+    ], id="div-top", className="row"),
+
+    html.Br(),
+
+    html.Div([
+        html.Div([
+            html.H5(
+                id="price-title-1d",
+                style={"text-align": "center"},
+                children=f"{ds.selected_token}-TAU 1 Day"
             ),
+            dcc.Graph(
+                id='price-graph-1d',
+                figure=ds.get_price_graph(ds.get_trades(d1))
+            )
+        ], id="div-1d", className="four columns"),
 
-            html.Div([
-                html.Label(children=f"Last Trade: N/A", id="last-trade", style={"text-align": "center"})
-            ]),
+        html.Div([
+            html.H5(
+                id="price-title-5d",
+                style={"text-align": "center"},
+                children=f"{ds.selected_token}-TAU 5 Days"
+            ),
+            dcc.Graph(
+                id='price-graph-5d',
+                figure=ds.get_price_graph(ds.get_trades(d5))
+            )
+        ], id="div-5d", className="four columns"),
 
-            html.Div([
-                html.Div([
-                    dcc.Dropdown(
-                        options=rs.get_all_token_symbols(),
-                        value=rs.get_selected_token(),
-                        multi=False,
-                        id="token_symbol_input"
-                    )
-                ], className="four columns"),
+        html.Div([
+            html.H5(
+                id="price-title-30d",
+                style={"text-align": "center"},
+                children=f"{ds.selected_token}-TAU 30 Days"
+            ),
+            dcc.Graph(
+                id='price-graph-30d',
+                figure=ds.get_price_graph(ds.get_trades(m1))
+            )
+        ], id="div-30d", className="four columns"),
+    ], id="div-1d5d30d", className="row"),
+
+    html.Br(),
+
+    html.Div([
+        html.H5(
+            children="Number of Trades per Token in last 5 Days",
+            id="trades-per-token-title",
+            style={"text-align": "center"}),
+
+        dcc.Graph(
+            id='trades-graph',
+            figure=ds.get_trades_graph(ds.get_trade_count(d5))
+        )
+    ], id="div-trades")
+])
 
 
-            ], className="row"),
+@app.callback(
+    Output('price-title-1d', 'children'),
+    Output('price-graph-1d', 'figure'),
+    Output('price-title-5d', 'children'),
+    Output('price-graph-5d', 'figure'),
+    Output('price-title-30d', 'children'),
+    Output('price-graph-30d', 'figure'),
+    Output('trades-graph', 'figure'),
+    Output('token-input', 'options'),
+    Output('contract-label', 'children'),
+    Input('interval-component', 'n_intervals'),
+    Input('token-input', 'value'))
+def update_price(n, token_symbol):
+    caller_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
 
-            html.Br(),
+    if caller_id == "token-input" and token_symbol:
+        ds.selected_token = token_symbol
 
-            html.Div([
-                html.Div([
-                    html.H5(
-                        children=f"{rs.get_selected_token()}-TAU 1 Day",
-                        id="price-title-1d",
-                        style={"text-align": "center"}),
+    elif caller_id == "interval-component" and n:
+        ds.update_trades()
 
-                    dcc.Graph(
-                        id='price-graph-1d',
-                        figure=rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_day)))
-                ], id="div-1d", className="four columns"),
+        if n % 60 == 0:
+            ds.update_tokens()
 
-                html.Div([
-                    html.H5(
-                        children=f"{rs.get_selected_token()}-TAU 5 Days",
-                        id="price-title-5d",
-                        style={"text-align": "center"}),
+    return [
+        f"{ds.selected_token}-TAU 1 Day",
+        ds.get_price_graph(ds.get_trades(d1)).update_layout(transition_duration=500),
+        f"{ds.selected_token}-TAU 5 Days",
+        ds.get_price_graph(ds.get_trades(d5)).update_layout(transition_duration=500),
+        f"{ds.selected_token}-TAU 30 Days",
+        ds.get_price_graph(ds.get_trades(m1)).update_layout(transition_duration=500),
+        ds.get_trades_graph(ds.get_trade_count(d5)).update_layout(transition_duration=500),
+        ds.get_symbols(),
+        ds.get_contract()
+    ]
 
-                    dcc.Graph(
-                        id='price-graph-5d',
-                        figure=rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), five_days)))
-                ], id="div-5d", className="four columns"),
 
-                html.Div([
-                    html.H5(
-                        children=f"{rs.get_selected_token()}-TAU 30 Days",
-                        id="price-title-30d",
-                        style={"text-align": "center"}),
+@app.callback(
+    Output('div-1d', 'style'),
+    Output('div-1d', 'className'),
+    Output('div-5d', 'className'),
+    Output('div-30d', 'className'),
+    Input('select-visible', 'value'))
+def update_visibility_1d(value):
+    if "1D" in value:
+        return [
+            {'display': 'inline'},
+            "four columns",
+            "four columns",
+            "four columns"
+        ]
+    else:
+        return [
+            {'display': 'none'},
+            "six columns",
+            "six columns",
+            "six columns"
+        ]
 
-                    dcc.Graph(
-                        id='price-graph-30d',
-                        figure=rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_month)))
-                ], id="div-30d", className="four columns"),
-            ], className="row"),
 
-            html.Div([
-                html.H5(
-                    children=f"{rs.get_selected_token()}-TAU Max",
-                    id="price-title-all",
-                    style={"text-align": "center"}),
+@app.callback(
+    Output('div-5d', 'style'),
+    Input('select-visible', 'value'))
+def update_visibility_5d(value):
+    if "5D" in value:
+        return {'display': 'inline'}
+    else:
+        return {'display': 'none'}
 
-                dcc.Graph(
-                    id='price-graph-all',
-                    figure=rs.get_price_graph(rs.get_token_trades(rs.get_selected_token())))
-            ], id="div-all"),
 
-            html.Div([
-                html.H5(
-                    children="Trades per Token",
-                    id="trades-per-token-title",
-                    style={"text-align": "center"}),
+@app.callback(
+    Output('div-30d', 'style'),
+    Input('select-visible', 'value'))
+def update_visibility_30d(value):
+    if "30D" in value:
+        return {'display': 'inline'}
+    else:
+        return {'display': 'none'}
 
-                dcc.Graph(
-                    id='trades-graph',
-                    figure=rs.get_trades_graph(rs.get_token_trade_count(0), rs.get_selected_token()))
-            ], id="div-trades")
-        ])
 
-        @app.callback(
-            Output('price-graph-1d', 'figure'),
-            Output('price-title-1d', 'children'),
-            Output('price-graph-5d', 'figure'),
-            Output('price-title-5d', 'children'),
-            Output('price-graph-30d', 'figure'),
-            Output('price-title-30d', 'children'),
-            Output('price-graph-all', 'figure'),
-            Output('price-title-all', 'children'),
-            Output('last-trade', 'children'),
-            Output('trades-graph', 'figure'),
-            Input('interval-component', 'n_intervals'),
-            Input('token_symbol_input', 'value'))
-        def update_graph(n, token_symbol):
-            caller_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
-            print(f"In update. caller {caller_id} with params: ", n, token_symbol)
-
-            if caller_id == "token_symbol_input" and token_symbol:
-                rs.set_selected_token(token_symbol)
-                print("Set selected token to:", token_symbol)
-
-                fig_1d = rs.get_price_graph(rs.get_token_trades(token_symbol, one_day))
-                fig_1d.update_layout(transition_duration=500)
-                fig_5d = rs.get_price_graph(rs.get_token_trades(token_symbol, five_days))
-                fig_5d.update_layout(transition_duration=500)
-                fig_30d = rs.get_price_graph(rs.get_token_trades(token_symbol, one_month))
-                fig_30d.update_layout(transition_duration=500)
-                fig_all = rs.get_price_graph(rs.get_token_trades(token_symbol))
-                fig_all.update_layout(transition_duration=500)
-                fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), token_symbol)
-                fig_trades.update_layout(transition_duration=500)
-
-                return [
-                    fig_1d, f"{token_symbol}-TAU 1 Day",
-                    fig_5d, f"{token_symbol}-TAU 5 Days",
-                    fig_30d, f"{token_symbol}-TAU 30 Days",
-                    fig_all, f"{token_symbol}-TAU Max",
-                    f"Last Trade: {rs.get_last_trade_date()}",
-                    fig_trades
-                ]
-
-            rs.update_trades()
-            print("Trades updated")
-
-            """            
-            if not rs.get_last_update():
-                print("No last_update, exiting update")
-                raise PreventUpdate
-            """
-
-            if hash(rs.get_last_update()) == rs.get_last_update_id():
-                print("Hash matches, exiting update")
-                raise PreventUpdate
-
-            rs.set_last_update_id(hash(rs.get_last_update()))
-            print("Set last_update_id to:", rs.get_last_update_id())
-
-            for tx in rs.get_last_update():
-                print("Checking trade:", tx)
-
-                if tx[1] == rs.get_selected_token():
-                    print("Trade matches selected token, updating and returning graphs")
-                    logging.info(f"Graphs for token {rs.get_selected_token()} updated")
-
-                    fig_1d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_day))
-                    fig_1d.update_layout(transition_duration=500)
-                    fig_5d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), five_days))
-                    fig_5d.update_layout(transition_duration=500)
-                    fig_30d = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token(), one_month))
-                    fig_30d.update_layout(transition_duration=500)
-                    fig_all = rs.get_price_graph(rs.get_token_trades(rs.get_selected_token()))
-                    fig_all.update_layout(transition_duration=500)
-                    fig_trades = rs.get_trades_graph(rs.get_token_trade_count(), rs.get_selected_token())
-                    fig_trades.update_layout(transition_duration=500)
-
-                    rs.set_last_trade_date(str(datetime.now()))
-
-                    return [
-                        fig_1d, f"{rs.get_selected_token()}-TAU 1 Day",
-                        fig_5d, f"{rs.get_selected_token()}-TAU 5 Days",
-                        fig_30d, f"{rs.get_selected_token()}-TAU 30 Days",
-                        fig_all, f"{rs.get_selected_token()}-TAU Max",
-                        f"Last Trade: {rs.get_last_trade_date()}",
-                        fig_trades
-                    ]
-
-            print("No trade matches selected token, exiting")
-            raise PreventUpdate
-
-        @app.callback(
-            Output('div-1d', 'style'),
-            Output('div-1d', 'className'),
-            Output('div-5d', 'className'),
-            Output('div-30d', 'className'),
-            Input('select-visible', 'value'))
-        def update_visibility_1d(value):
-            if "1D" in value:
-                return [
-                    {'display': 'inline'},
-                    "four columns",
-                    "four columns",
-                    "four columns"
-                ]
-            else:
-                return [
-                    {'display': 'none'},
-                    "six columns",
-                    "six columns",
-                    "six columns"
-                ]
-
-        @app.callback(
-            Output('div-5d', 'style'),
-            Input('select-visible', 'value'))
-        def update_visibility_5d(value):
-            if "5D" in value:
-                return {'display': 'inline'}
-            else:
-                return {'display': 'none'}
-
-        @app.callback(
-            Output('div-30d', 'style'),
-            Input('select-visible', 'value'))
-        def update_visibility_30d(value):
-            if "30D" in value:
-                return {'display': 'inline'}
-            else:
-                return {'display': 'none'}
-
-        @app.callback(
-            Output('div-all', 'style'),
-            Input('select-visible', 'value'))
-        def update_visibility_all(value):
-            if "MAX" in value:
-                return {'display': 'inline'}
-            else:
-                return {'display': 'none'}
-
-        @app.callback(
-            Output('div-trades', 'style'),
-            Input('select-visible', 'value'))
-        def update_visibility_trades(value):
-            if "TRADES" in value:
-                return {'display': 'inline'}
-            else:
-                return {'display': 'none'}
-
-        app.run_server(debug=cf.get('debug'), threaded=True, port=cf.get('dashboard_port'))
+@app.callback(
+    Output('div-trades', 'style'),
+    Input('select-visible', 'value'))
+def update_visibility_trades(value):
+    if "TRADES" in value:
+        return {'display': 'inline'}
+    else:
+        return {'display': 'none'}
 
 
 if __name__ == '__main__':
-    db = Database()
-    db.create_trade_history()
-    db.create_token_list()
-
-    cf = Config()
-
-    rs = Rocketswap(cf, db)
-    rs.update_tokens()
-    rs.update_trades()
-
-    Dashboard(cf, rs)
+    app.run_server(debug=cfg.get("debug"), threaded=True, port=cfg.get("dashboard_port"))
