@@ -587,4 +587,4 @@ def update_visibility_trades(value):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=cfg.get("debug"), threaded=True, port=cfg.get("dashboard_port"))
+    app.run_server(debug=cfg.get("debug"), threaded=True, port=cfg.get("dashboard_port"), host="0.0.0.0")
