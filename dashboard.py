@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import logging
 
@@ -18,6 +19,18 @@ from pandas import DataFrame
 from pathlib import Path
 from distutils.util import strtobool
 from datetime import datetime, timedelta
+
+
+def create_kill_script(filename):
+    shebang = "#!/bin/bash"
+    command = f"kill -9 {os.getpid()}"
+
+    with open(filename, "w") as f:
+        f.truncate(0)
+        f.write(f"{shebang}\n\n{command}")
+
+
+create_kill_script("stop")
 
 app = dash.Dash(
     __name__,
