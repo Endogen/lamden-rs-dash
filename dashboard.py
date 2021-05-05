@@ -536,9 +536,6 @@ app.layout = html.Div(
                                 ),
                             ],
                         ),
-                        html.P(id="total-rides"),
-                        html.P(id="total-rides-selection"),
-                        html.P(id="date-value"),
                         dcc.Markdown(
                             children=[
                                 "View Source on [GitHub](https://github.com/Endogen/lamden-rs-dash)"
