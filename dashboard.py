@@ -12,6 +12,7 @@ import plotly.graph_objs as go
 import pandas as pd
 
 from dash.dependencies import Output, Input
+from plotly.subplots import make_subplots
 
 from pandas import DataFrame
 from pathlib import Path
@@ -114,6 +115,7 @@ class Database:
             "   token_symbol TEXT NOT NULL," \
             "   price REAL NOT NULL," \
             "   time INTEGER NOT NULL," \
+            "   amount REAL NOT NULL," \
             "   type TEXT NOT NULL" \
             ")"
 
@@ -173,12 +175,12 @@ class Database:
 
         return self.execute(sql, token_symbol)
 
-    def insert_trade(self, contract_name, token_symbol, price, time, type):
+    def insert_trade(self, contract_name, token_symbol, price, time, amount, type):
         sql = \
-            "INSERT INTO trade_history (contract_name, token_symbol, price, time, type) " \
-            "VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO trade_history (contract_name, token_symbol, price, time, amount, type) " \
+            "VALUES (?, ?, ?, ?, ?, ?)"
 
-        return self.execute(sql, contract_name, token_symbol, price, time, type)
+        return self.execute(sql, contract_name, token_symbol, price, time, amount, type)
 
     def insert_token(self, contract_name, has_market, base64_png, base64_svg, logo_type,
                      logo_data, token_logo_url, token_name, token_symbol):
@@ -240,7 +242,7 @@ class Dashboard:
         trades = list()
 
         skip = 0
-        take = 10
+        take = 50
         call = True
 
         while call:
@@ -261,6 +263,7 @@ class Dashboard:
                             tx["token_symbol"],
                             tx["price"],
                             tx["time"],
+                            tx["amount"],
                             tx["type"]
                         ]
 
@@ -301,7 +304,7 @@ class Dashboard:
         data = list()
 
         for trade in db.select_trades(self.selected_token, start_secs)["data"]:
-            data.append([trade[3], trade[2]])
+            data.append([trade[3], trade[2], trade[4]])
 
         return data
 
@@ -331,34 +334,101 @@ class Dashboard:
         else:
             return "-"
 
+    # TODO: Range Slider? https://community.plotly.com/t/get-min-and-max-values-of-x-axis-which-is-time-series/6898
+    # TODO: Add ATH and ATL
+    # TODO: Add slider to change graph height
     def get_price_graph(self, data):
-        df = DataFrame(reversed(data), columns=["DateTime", "Price"])
+        df = DataFrame(reversed(data), columns=["DateTime", "Price", "Volume"])
         df["DateTime"] = pd.to_datetime(df["DateTime"], unit="s")
         df.sort_index(ascending=True, inplace=True)
 
-        graph = go.Scatter(x=df.get("DateTime"), y=df.get("Price"))
+        fig = make_subplots(rows=2, cols=1,
+                            shared_xaxes=True,
+                            vertical_spacing=0.05,
+                            row_heights=[0.8, 0.2])
 
-        layout = go.Layout(
-            height=350,
-            plot_bgcolor='rgb(255,255,255)',
+        fig.add_trace(go.Scatter(x=df.get("DateTime"), y=df.get("Price"), name="Price", yaxis="y1"), row=1, col=1)
+        fig.add_trace(go.Bar(x=df.get("DateTime"), y=df.get("Volume"), name="Volume", yaxis="y2"), row=2, col=1)
+
+        """
+        max_index = df["Price"].idxmax()
+        min_index = df["Price"].idxmin()
+
+        max_price = df["Price"].max()
+        min_price = df["Price"].min()
+
+        max_datetime = df["DateTime"][max_index]
+        min_datetime = df["DateTime"][min_index]
+
+        fig.add_annotation(x=max_datetime, y=max_price, text="ATH", showarrow=False)
+        fig.add_annotation(x=min_datetime, y=min_price, text="ATL", showarrow=False)
+        """
+
+        fig.update_layout(
+            height=600,
+            showlegend=False,
+            paper_bgcolor='rgb(34,34,34)',
+            plot_bgcolor='rgb(34,34,34)',
+            font=dict(
+                family='Open Sans',
+                color='rgb(255,255,255)'
+            ),
+            title=dict(
+                text=ds.selected_token,
+                font=dict(
+                    size=20
+                )
+            ),
             xaxis=dict(
-                gridcolor="rgb(215, 215, 215)"
+                gridcolor="rgb(90,90,90)"
             ),
             yaxis=dict(
-                gridcolor="rgb(215, 215, 215)",
-                zerolinecolor="rgb(233, 233, 233)",
-                ticksuffix=" ",
-                autorange=True,
-                fixedrange=False
+                gridcolor="rgb(90,90,90)",
+                zerolinecolor="rgb(90,90,90)",
+                domain=[0.25, 1],
+                ticksuffix="  "
             ),
+            xaxis2=dict(
+                gridcolor="rgb(90,90,90)"
+            ),
+            yaxis2=dict(
+                gridcolor="rgb(90,90,90)",
+                zerolinecolor="rgb(90,90,90)",
+                ticksuffix=" "
+            ),
+            bargap=0
+        )
+
+        fig.update_traces(marker=dict(line=dict(width=0)), row=2, col=1)
+
+        # TODO: Change margin?
+        """
             margin=dict(
                 r=25,
                 t=5,
                 b=40)
         )
+        """
 
-        return go.Figure(data=[graph], layout=layout)
+        return fig
 
+    def get_price_graph_1d(self):
+        graph = self.get_price_graph(ds.get_trades(d1))
+        graph.update_layout(title_text=f"{ds.selected_token}-TAU 1 Day")
+        graph.update_traces(mode='lines+markers', row=1, col=1)
+        return graph
+
+    def get_price_graph_5d(self):
+        graph = self.get_price_graph(ds.get_trades(d5))
+        graph.update_layout(title_text=f"{ds.selected_token}-TAU 5 Days")
+        return graph
+
+    def get_price_graph_1m(self):
+        graph = self.get_price_graph(ds.get_trades(m1))
+        graph.update_layout(title_text=f"{ds.selected_token}-TAU 30 Days")
+        return graph
+
+    # TODO: Add Range Selector Buttons https://plotly.com/python/time-series/
     def get_trades_graph(self, data):
         df = DataFrame(reversed(data), columns=["Tokens", "Trades"])
         df.sort_index(ascending=True, inplace=True)
@@ -372,137 +442,142 @@ class Dashboard:
         graph = go.Bar(x=df.get("Tokens"), y=df.get("Trades"), marker_color=colors)
 
         layout = go.Layout(
-            plot_bgcolor='rgb(255,255,255)',
-            xaxis=dict(
-                gridcolor="rgb(215, 215, 215)"
+            height=600,
+            showlegend=False,
+            paper_bgcolor='rgb(33,33,33)',
+            plot_bgcolor='rgb(33,33,33)',
+            font=dict(
+                family='Open Sans',
+                color='rgb(255,255,255)'
             ),
             yaxis=dict(
-                gridcolor="rgb(215, 215, 215)",
-                zerolinecolor="rgb(233, 233, 233)",
-                ticksuffix=" "
+                gridcolor="rgb(90,90,90)",
+                zerolinecolor="rgb(90,90,90)",
+                ticksuffix="  "
             ),
-            margin=dict(
-                r=25,
-                t=5,
-                b=40)
+            title=dict(
+                text=f"Trades per Token in last 5 Days",
+                font=dict(
+                    size=20
+                )
+            )
         )
 
         return go.Figure(data=[graph], layout=layout)
 
 
 ds = Dashboard()
+ds.update_trades()
+ds.update_tokens()
 
 
-app.layout = html.Div(children=[
-    dcc.Store(
-        id='storage',
-        storage_type='local'
-    ),
-
-    dcc.Interval(
-        id='interval-component',
-        interval=cfg.get("update_interval"),
-        n_intervals=0
-    ),
-
-    html.Div([
-        html.Div([
-            dcc.Dropdown(
-                options=ds.get_symbols(),
-                value=ds.selected_token,
-                multi=False,
-                id="token-input"
-            )
-        ], id="div-token-input", className="four columns"),
-
-        html.Div([
-            html.Label(
-                children=ds.get_contract(),
-                id="contract-label",
-                style={"text-align": "center"}
-            )
-        ], id="div-contract-label", className="four columns"),
-
-        html.Div([
-            dcc.Checklist(
-                id="select-visible",
-                options=[
-                    {'label': '1D', 'value': '1D'},
-                    {'label': '5D', 'value': '5D'},
-                    {'label': '30D', 'value': '30D'},
-                    {'label': 'Trades', 'value': 'TRADES'}
-                ],
-                value=['1D', '5D', '30D', 'TRADES'],
-                labelStyle={'display': 'inline-block'},
-                style={"text-align": "right"}
-            )
-        ], id="div-select-visible", className="four columns"),
-
-    ], id="div-top", className="row"),
-
-    html.Br(),
-
-    html.Div([
-        html.Div([
-            html.H5(
-                id="price-title-1d",
-                style={"text-align": "center"},
-                children=f"{ds.selected_token}-TAU 1 Day"
-            ),
-            dcc.Graph(
-                id='price-graph-1d',
-                figure=ds.get_price_graph(ds.get_trades(d1))
-            )
-        ], id="div-1d", className="four columns"),
-
-        html.Div([
-            html.H5(
-                id="price-title-5d",
-                style={"text-align": "center"},
-                children=f"{ds.selected_token}-TAU 5 Days"
-            ),
-            dcc.Graph(
-                id='price-graph-5d',
-                figure=ds.get_price_graph(ds.get_trades(d5))
-            )
-        ], id="div-5d", className="four columns"),
-
-        html.Div([
-            html.H5(
-                id="price-title-30d",
-                style={"text-align": "center"},
-                children=f"{ds.selected_token}-TAU 30 Days"
-            ),
-            dcc.Graph(
-                id='price-graph-30d',
-                figure=ds.get_price_graph(ds.get_trades(m1))
-            )
-        ], id="div-30d", className="four columns"),
-    ], id="div-1d5d30d", className="row"),
-
-    html.Br(),
-
-    html.Div([
-        html.H5(
-            children="Number of Trades per Token in last 5 Days",
-            id="trades-per-token-title",
-            style={"text-align": "center"}),
-
-        dcc.Graph(
-            id='trades-graph',
-            figure=ds.get_trades_graph(ds.get_trade_count(d5))
+app.layout = html.Div(
+    children=[
+        dcc.Interval(
+            id='interval-component',
+            interval=cfg.get("update_interval"),
+            n_intervals=0
+        ),
+        html.Div(
+            className="row",
+            children=[
+                # Column for user controls
+                html.Div(
+                    className="four columns div-user-controls",
+                    children=[
+                        html.H2("🚀 ROCKETSWAP DASHBOARD"),
+                        html.P(
+                            """Choose a token to show live data. The graphs will update 
+                            within 5 seconds after a trade happens."""
+                        ),
+                        html.Div(
+                            className="row",
+                            children=[
+                                html.Div(
+                                    className="div-for-dropdown",
+                                    children=[
+                                        dcc.Dropdown(
+                                            options=ds.get_symbols(),
+                                            value=ds.selected_token,
+                                            multi=False,
+                                            id="token-input"
+                                        )
+                                    ],
+                                ),
+                                html.Br(),
+                                html.P(
+                                    """Select graphs to display"""
+                                ),
+                                html.Div(
+                                    className="div-for-dropdown",
+                                    children=[
+                                        dcc.Checklist(
+                                            id="select-visible",
+                                            options=[
+                                                {'label': '1 Day', 'value': '1D'},
+                                                {'label': '5 Days', 'value': '5D'},
+                                                {'label': '30 Days', 'value': '1M'},
+                                                {'label': 'Trades', 'value': 'TR'}
+                                            ],
+                                            value=['1D', '5D', '1M', 'TR'],
+                                            persistence_type="local",
+                                            persistence="true"
+                                        )
+                                    ],
+                                ),
+                                html.Div(
+                                    className="div-for-dropdown",
+                                    children=[
+                                        html.Label(
+                                            children=f"Contract: {ds.get_contract()}",
+                                            id="contract-label"
+                                        )
+                                    ],
+                                ),
+                            ],
+                        ),
+                        html.P(id="total-rides"),
+                        html.P(id="total-rides-selection"),
+                        html.P(id="date-value"),
+                        dcc.Markdown(
+                            children=[
+                                "View Source on [GitHub](https://github.com/Endogen/lamden-rs-dash)"
+                            ]
+                        ),
+                    ],
+                ),
+                # Column for app graphs and plots
+                html.Div(
+                    className="eight columns div-for-charts bg-grey",
+                    children=[
+                        dcc.Graph(
+                            id='price-graph-1d',
+                            figure=ds.get_price_graph(ds.get_trades(d1))
+                        ),
+                        dcc.Graph(
+                            id='price-graph-5d',
+                            figure=ds.get_price_graph(ds.get_trades(d5))
+                        ),
+                        dcc.Graph(
+                            id='price-graph-1m',
+                            figure=ds.get_price_graph(ds.get_trades(m1))
+                        ),
+                        dcc.Graph(
+                            id='trades-graph',
+                            figure=ds.get_trades_graph(ds.get_trade_count(d5)),
+                        )
+                    ],
+                ),
+            ],
         )
-    ], id="div-trades")
-])
+    ]
+)
 
 
 @app.callback(
-    Output('price-title-1d', 'children'),
     Output('price-graph-1d', 'figure'),
-    Output('price-title-5d', 'children'),
     Output('price-graph-5d', 'figure'),
-    Output('price-title-30d', 'children'),
-    Output('price-graph-30d', 'figure'),
+    Output('price-graph-1m', 'figure'),
     Output('trades-graph', 'figure'),
     Output('token-input', 'options'),
     Output('contract-label', 'children'),
@@ -517,47 +592,32 @@ def update_price(n, token_symbol):
     elif caller_id == "interval-component" and n:
         ds.update_trades()
 
+        # TODO: This needs to change
         if n % 60 == 0:
             ds.update_tokens()
 
     return [
-        f"{ds.selected_token}-TAU 1 Day",
-        ds.get_price_graph(ds.get_trades(d1)).update_layout(transition_duration=500),
-        f"{ds.selected_token}-TAU 5 Days",
-        ds.get_price_graph(ds.get_trades(d5)).update_layout(transition_duration=500),
-        f"{ds.selected_token}-TAU 30 Days",
-        ds.get_price_graph(ds.get_trades(m1)).update_layout(transition_duration=500),
+        ds.get_price_graph_1d().update_layout(transition_duration=500),
+        ds.get_price_graph_5d().update_layout(transition_duration=500),
+        ds.get_price_graph_1m().update_layout(transition_duration=500),
         ds.get_trades_graph(ds.get_trade_count(d5)).update_layout(transition_duration=500),
         ds.get_symbols(),
-        ds.get_contract()
+        f"Contract: {ds.get_contract()}"
     ]
 
 
 @app.callback(
-    Output('div-1d', 'style'),
-    Output('div-1d', 'className'),
-    Output('div-5d', 'className'),
-    Output('div-30d', 'className'),
+    Output('price-graph-1d', 'style'),
     Input('select-visible', 'value'))
 def update_visibility_1d(value):
     if "1D" in value:
-        return [
-            {'display': 'inline'},
-            "four columns",
-            "four columns",
-            "four columns"
-        ]
+        return {'display': 'inline'}
     else:
-        return [
-            {'display': 'none'},
-            "six columns",
-            "six columns",
-            "six columns"
-        ]
+        return {'display': 'none'}
 
 
 @app.callback(
-    Output('div-5d', 'style'),
+    Output('price-graph-5d', 'style'),
     Input('select-visible', 'value'))
 def update_visibility_5d(value):
     if "5D" in value:
@@ -567,20 +627,20 @@ def update_visibility_5d(value):
 
 
 @app.callback(
-    Output('div-30d', 'style'),
+    Output('price-graph-1m', 'style'),
     Input('select-visible', 'value'))
 def update_visibility_30d(value):
-    if "30D" in value:
+    if "1M" in value:
         return {'display': 'inline'}
     else:
         return {'display': 'none'}
 
 
 @app.callback(
-    Output('div-trades', 'style'),
+    Output('trades-graph', 'style'),
     Input('select-visible', 'value'))
 def update_visibility_trades(value):
-    if "TRADES" in value:
+    if "TR" in value:
         return {'display': 'inline'}
     else:
         return {'display': 'none'}
