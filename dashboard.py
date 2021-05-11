@@ -21,6 +21,11 @@ from datetime import datetime, timedelta
 from threading import Thread, Event
 
 
+# TODO: Check what to do with DOUG / DOUGLAS - Remove DOUG
+# TODO: When interval to check is very long then we get less data points in the graph
+# TODO: Titles of graphs are not always changing correctly
+# TODO: Use websockets to get messages over to users - see example
+
 def create_kill_script(filename):
     shebang = "#!/bin/bash"
     command = f"kill -9 {os.getpid()}"
@@ -175,6 +180,7 @@ class Database:
 
         return self.execute(sql)
 
+    # TODO: Change SELECT * to only what we need
     def select_trades(self, token_symbol, start_secs=0):
         sql = \
             "SELECT * " \
@@ -497,7 +503,7 @@ class Dashboard:
 ds = Dashboard()
 
 
-# TODO: Runs twice!
+# TODO: Runs twice?
 class UpdateTrades(Thread):
     def __init__(self, event):
         Thread.__init__(self)
@@ -615,7 +621,8 @@ app.layout = html.Div(
 
 
 # TODO: Add html.Table
-# TODO: Find similarities and remove dulplicate stuff
+# TODO: Find similarities and remove duplicates stuff
+# TODO: Fetch trade data only once from DB and send it to all graphs
 @app.callback(
     Output('token-input', 'options'),
     Output('token-input', 'value'),
@@ -669,6 +676,7 @@ def update_price(counter, token, data):
             graph_1m = ds.get_price_graph_1m(data["token"]).update_layout(transition_duration=500)
             graph_tr = ds.get_trades_graph(ds.get_trade_count(d5), data["token"]).update_layout(transition_duration=500)
 
+    # Initial opening of website
     else:
         token_input_options = ds.get_symbols()
         token_input_value = data["token"]
@@ -732,6 +740,7 @@ def update_visibility_trades(value):
         return {'display': 'none'}
 
 
+# TODO: Writing in dropdown field: font is black, needs to be white
 if __name__ == '__main__':
     UpdateTrades(Event()).start()
     UpdateTokens(Event()).start()
