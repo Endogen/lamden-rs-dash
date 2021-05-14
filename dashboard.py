@@ -439,27 +439,21 @@ class Dashboard:
 
     def get_price_graph_1d(self, token):
         d1 = to_unix_time(datetime.utcnow() - timedelta(days=1))
-
         graph = self.get_price_graph(ds.get_trades(token, d1), token)
         graph.update_layout(title_text=f"{token}-TAU 1 Day")
         graph.update_traces(mode='lines+markers', row=1, col=1)
-
         return graph
 
     def get_price_graph_5d(self, token):
         d5 = to_unix_time(datetime.utcnow() - timedelta(days=5))
-
         graph = self.get_price_graph(ds.get_trades(token, d5), token)
         graph.update_layout(title_text=f"{token}-TAU 5 Days")
-
         return graph
 
     def get_price_graph_1m(self, token):
         m1 = to_unix_time(datetime.utcnow() - timedelta(days=30))
-
         graph = self.get_price_graph(ds.get_trades(token, m1), token)
         graph.update_layout(title_text=f"{token}-TAU 30 Days")
-
         return graph
 
     # TODO: Add Range Selector Buttons https://plotly.com/python/time-series/
@@ -498,6 +492,11 @@ class Dashboard:
         )
 
         return go.Figure(data=[graph], layout=layout)
+
+    def get_trades_graph_5d(self, token):
+        d5 = to_unix_time(datetime.utcnow() - timedelta(days=5))
+        graph = self.get_trades_graph(self.get_trade_count(d5), token)
+        return graph
 
 
 ds = Dashboard()
@@ -621,7 +620,6 @@ app.layout = html.Div(
 
 
 # TODO: Add html.Table
-# TODO: Find similarities and remove duplicates stuff
 # TODO: Fetch trade data only once from DB and send it to all graphs
 @app.callback(
     Output('token-input', 'options'),
@@ -658,11 +656,10 @@ def update_price(counter, token, data):
         data["token"] = token
         token_contract = ds.get_contract(token)
 
-        d5 = to_unix_time(datetime.utcnow() - timedelta(days=5))
         graph_1d = ds.get_price_graph_1d(token).update_layout(transition_duration=500)
         graph_5d = ds.get_price_graph_5d(token).update_layout(transition_duration=500)
         graph_1m = ds.get_price_graph_1m(token).update_layout(transition_duration=500)
-        graph_tr = ds.get_trades_graph(ds.get_trade_count(d5), token).update_layout(transition_duration=500)
+        graph_tr = ds.get_trades_graph_5d(token).update_layout(transition_duration=500)
 
     # Every X seconds - check for updates
     elif caller_id == "interval-component" and counter:
@@ -670,11 +667,10 @@ def update_price(counter, token, data):
             token_input_options = ds.get_symbols()
 
         if db.select_count_trades() != data["trade_count"]:
-            d5 = to_unix_time(datetime.utcnow() - timedelta(days=5))
             graph_1d = ds.get_price_graph_1d(data["token"]).update_layout(transition_duration=500)
             graph_5d = ds.get_price_graph_5d(data["token"]).update_layout(transition_duration=500)
             graph_1m = ds.get_price_graph_1m(data["token"]).update_layout(transition_duration=500)
-            graph_tr = ds.get_trades_graph(ds.get_trade_count(d5), data["token"]).update_layout(transition_duration=500)
+            graph_tr = ds.get_trades_graph_5d(data["token"]).update_layout(transition_duration=500)
 
     # Initial opening of website
     else:
@@ -682,11 +678,10 @@ def update_price(counter, token, data):
         token_input_value = data["token"]
         token_contract = ds.get_contract(data["token"])
 
-        d5 = to_unix_time(datetime.utcnow() - timedelta(days=5))
         graph_1d = ds.get_price_graph_1d(data["token"]).update_layout(transition_duration=500)
         graph_5d = ds.get_price_graph_5d(data["token"]).update_layout(transition_duration=500)
         graph_1m = ds.get_price_graph_1m(data["token"]).update_layout(transition_duration=500)
-        graph_tr = ds.get_trades_graph(ds.get_trade_count(d5), data["token"]).update_layout(transition_duration=500)
+        graph_tr = ds.get_trades_graph_5d(data["token"]).update_layout(transition_duration=500)
 
     return [
         token_input_options,
