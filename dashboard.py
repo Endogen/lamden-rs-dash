@@ -160,7 +160,7 @@ class Database:
 
     def select_last_trade(self):
         sql = \
-            "SELECT * " \
+            "SELECT time " \
             "FROM trade_history " \
             "ORDER BY time DESC LIMIT 1"
 
@@ -180,10 +180,9 @@ class Database:
 
         return self.execute(sql)
 
-    # TODO: Change SELECT * to only what we need
     def select_trades(self, token_symbol, start_secs=0):
         sql = \
-            "SELECT * " \
+            "SELECT price, time, amount, type " \
             "FROM trade_history " \
             f"WHERE token_symbol = ? AND time >= {start_secs} " \
             "ORDER BY time ASC"
@@ -202,9 +201,10 @@ class Database:
 
     def select_contract(self, token_symbol):
         sql = \
-            "SELECT * " \
+            "SELECT contract_name " \
             "FROM token_list " \
-            "WHERE token_symbol = ?"
+            "WHERE token_symbol = ? " \
+            "LIMIT 1"
 
         return self.execute(sql, token_symbol)
 
@@ -260,7 +260,7 @@ class Dashboard:
         res = db.select_last_trade()
 
         if res and res["data"]:
-            last_secs = res["data"][0][3]
+            last_secs = res["data"][0][0]
         else:
             last_secs = 0
 
@@ -327,7 +327,7 @@ class Dashboard:
         data = list()
 
         for trade in db.select_trades(token, start_secs)["data"]:
-            data.append([trade[3], trade[2], trade[4]])
+            data.append([trade[1], trade[0], trade[3]])
 
         return data
 
