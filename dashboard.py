@@ -23,7 +23,6 @@ from threading import Thread, Event
 
 # TODO: Check what to do with DOUG / DOUGLAS - Remove DOUG
 # TODO: When interval to check is very long then we get less data points in the graph
-# TODO: Titles of graphs are not always changing correctly
 # TODO: Use websockets to get messages over to users - see example
 # TODO: Sidebar should always stay in the same place - also while scrolling graphs
 
@@ -607,10 +606,30 @@ app.layout = html.Div(
                 html.Div(
                     className="eight columns div-for-charts bg-grey",
                     children=[
-                        dcc.Graph(id='price-graph-1d'),
-                        dcc.Graph(id='price-graph-5d'),
-                        dcc.Graph(id='price-graph-1m'),
-                        dcc.Graph(id='trades-graph')
+                        dcc.Graph(
+                            id='price-graph-1d',
+                            config={
+                                'displayModeBar': False
+                            }
+                        ),
+                        dcc.Graph(
+                            id='price-graph-5d',
+                            config={
+                                'displayModeBar': False
+                            }
+                        ),
+                        dcc.Graph(
+                            id='price-graph-1m',
+                            config={
+                                'displayModeBar': False
+                            }
+                        ),
+                        dcc.Graph(
+                            id='trades-graph',
+                            config={
+                                'displayModeBar': False
+                            }
+                        )
                     ],
                 ),
             ],
@@ -656,10 +675,10 @@ def update_price(counter, token, data):
 
         token_contract = ds.get_contract(data["token"])
 
-        graph_1d = ds.get_price_graph_1d(data["token"]).update_layout(transition_duration=300)
-        graph_5d = ds.get_price_graph_5d(data["token"]).update_layout(transition_duration=300)
-        graph_1m = ds.get_price_graph_1m(data["token"]).update_layout(transition_duration=300)
-        graph_tr = ds.get_trades_graph_5d(data["token"]).update_layout(transition_duration=300)
+        graph_1d = ds.get_price_graph_1d(data["token"])
+        graph_5d = ds.get_price_graph_5d(data["token"])
+        graph_1m = ds.get_price_graph_1m(data["token"])
+        graph_tr = ds.get_trades_graph_5d(data["token"])
 
     # Every X seconds - check for updates
     elif caller_id == "interval-component" and counter:
@@ -667,10 +686,10 @@ def update_price(counter, token, data):
             token_input_options = ds.get_symbols()
 
         if db.select_count_trades() != data["trade_count"]:
-            graph_1d = ds.get_price_graph_1d(data["token"]).update_layout(transition_duration=300)
-            graph_5d = ds.get_price_graph_5d(data["token"]).update_layout(transition_duration=300)
-            graph_1m = ds.get_price_graph_1m(data["token"]).update_layout(transition_duration=300)
-            graph_tr = ds.get_trades_graph_5d(data["token"]).update_layout(transition_duration=300)
+            graph_1d = ds.get_price_graph_1d(data["token"])
+            graph_5d = ds.get_price_graph_5d(data["token"])
+            graph_1m = ds.get_price_graph_1m(data["token"])
+            graph_tr = ds.get_trades_graph_5d(data["token"])
 
     # Initial opening of website
     else:
@@ -678,10 +697,10 @@ def update_price(counter, token, data):
         token_input_value = data["token"]
         token_contract = ds.get_contract(data["token"])
 
-        graph_1d = ds.get_price_graph_1d(data["token"]).update_layout(transition_duration=300)
-        graph_5d = ds.get_price_graph_5d(data["token"]).update_layout(transition_duration=300)
-        graph_1m = ds.get_price_graph_1m(data["token"]).update_layout(transition_duration=300)
-        graph_tr = ds.get_trades_graph_5d(data["token"]).update_layout(transition_duration=300)
+        graph_1d = ds.get_price_graph_1d(data["token"])
+        graph_5d = ds.get_price_graph_5d(data["token"])
+        graph_1m = ds.get_price_graph_1m(data["token"])
+        graph_tr = ds.get_trades_graph_5d(data["token"])
 
     return [
         token_input_options,
